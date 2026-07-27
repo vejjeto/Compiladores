@@ -1,0 +1,37 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_TITLE =~ /-skip$/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  auto_cancel:
+    on_new_commit: interruptible
+
+stages:
+  - lint
+  - build
+  - test
+
+lint:
+  stage: lint
+  script:
+    - echo "Verificando HTML..."
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+build:
+  stage: build
+  script:
+    - echo "Compilando proyecto..."
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+test:
+  stage: test
+  script:
+    - echo "Ejecutando pruebas..."
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
