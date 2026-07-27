@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control Robótico - Compiladores</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ===== NAVBAR ===== -->
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <div class="logo">RC</div>
+      <div>
+        <h1>Robot Control</h1>
+        <span class="subtitle">Sistema de Control vía WebSockets</span>
+      </div>
+    </div>
+    <div class="role-switch">
+      <button class="role-btn active" data-role="transmitter">Transmisor</button>
+      <button class="role-btn" data-role="receiver">Receptor</button>
+    </div>
+  </nav>
+
+  <!-- ===== TRANSMITTER VIEW ===== -->
+  <div class="view active" id="view-transmitter">
+    <!-- Panel Izquierdo: Control + Video -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Consola Operadora <span class="badge badge-transmitter">TX</span></h2>
+        <div class="status-indicator" id="tx-status">
+          <span class="status-dot status-disconnected"></span>
+          <span>Desconectado</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="form-group">
+          <label>Programa de Comandos</label>
+          <textarea
+            class="form-input"
+            id="tx-command-input"
+            placeholder="P, A:3, R:2, D, O, C, F"
+            spellcheck="false"
+          ></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="tx-execute-btn">Ejecutar Programa</button>
+          <button class="btn btn-danger" id="tx-clear-btn">Limpiar</button>
+        </div>
+        <div class="video-container" id="tx-video-container">
+          <video id="tx-video-player" autoplay muted playsinline></video>
+          <div class="video-placeholder" id="tx-video-placeholder">
+            <span class="icon">&#9655;</span>
+            <span>Esperando comando P para iniciar stream</span>
+          </div>
+          <div class="video-overlay hidden" id="tx-video-overlay">LIVE</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel Derecho: Logs Transmisión -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Logs de Transmisión</h2>
+        <button class="btn btn-danger" id="tx-clear-logs-btn">Limpiar Logs</button>
+      </div>
+      <div class="panel-body">
+        <div class="log-console" id="tx-log-console"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== RECEIVER VIEW ===== -->
+  <div class="view" id="view-receiver">
+    <!-- Panel Izquierdo: Auditoría -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Panel de Auditoría <span class="badge badge-receptor">RX</span></h2>
+        <div class="status-indicator" id="rx-esp-status">
+          <span class="status-dot status-disconnected"></span>
+          <span>ESP32 Desconectada</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="form-group">
+          <label>Dirección IP de la ESP32</label>
+          <input
+            type="text"
+            class="form-input"
+            id="rx-esp-ip"
+            placeholder="192.168.1.15"
+          >
+        </div>
+        <div class="form-group">
+          <label>Puerto WebSocket</label>
+          <input
+            type="text"
+            class="form-input"
+            id="rx-esp-port"
+            placeholder="8080"
+            value="8080"
+          >
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="rx-connect-btn">Conectar ESP32</button>
+          <button class="btn btn-danger" id="rx-disconnect-btn">Desconectar</button>
+        </div>
+
+        <!-- Desglose del Autómata (se llena dinámicamente) -->
+        <div class="audit-breakdown hidden" id="rx-audit-breakdown">
+          <div class="prime-check" data-prime="2">
+            <span class="check-icon check-fail">X</span>
+            <span>% 2</span>
+          </div>
+          <div class="prime-check" data-prime="3">
+            <span class="check-icon check-fail">X</span>
+            <span>% 3</span>
+          </div>
+          <div class="prime-check" data-prime="5">
+            <span class="check-icon check-fail">X</span>
+            <span>% 5</span>
+          </div>
+          <div class="prime-check" data-prime="7">
+            <span class="check-icon check-fail">X</span>
+            <span>% 7</span>
+          </div>
+          <div class="prime-check" data-prime="11">
+            <span class="check-icon check-fail">X</span>
+            <span>% 11</span>
+          </div>
+          <div class="prime-check" data-prime="13">
+            <span class="check-icon check-fail">X</span>
+            <span>% 13</span>
+          </div>
+          <div class="prime-check" data-prime="17">
+            <span class="check-icon check-fail">X</span>
+            <span>% 17</span>
+          </div>
+          <div class="prime-check" data-prime="19">
+            <span class="check-icon check-fail">X</span>
+            <span>% 19</span>
+          </div>
+        </div>
+
+        <div class="dictamen hidden" id="rx-dictamen"></div>
+      </div>
+    </div>
+
+    <!-- Panel Derecho: Logs Auditoría -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Consola de Auditoría</h2>
+        <button class="btn btn-danger" id="rx-clear-logs-btn">Limpiar Logs</button>
+      </div>
+      <div class="panel-body">
+        <div class="log-console" id="rx-log-console"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SCRIPTS ===== -->
+  <script src="js/ws-manager.js"></script>
+  <script src="js/views/transmitterView.js"></script>
+  <script src="js/views/receiverView.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
