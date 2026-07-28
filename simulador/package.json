@@ -1,0 +1,12 @@
+{
+  "name": "esp32-simulador",
+  "version": "1.0.0",
+  "description": "Simulador de ESP32 para pruebas del sistema de control robótico",
+  "type": "module",
+  "scripts": {
+    "start": "node esp32-simulator.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

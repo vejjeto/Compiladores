@@ -1,4 +1,4 @@
-export const PRIMES = [2, 3, 5, 7, 11, 13, 17, 19];
+export const PRIMES = [41, 43, 47, 53, 59, 61];
 
 export function divisibilityAutomaton(number, prime) {
   const digits = number.toString().split('').map(Number);

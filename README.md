@@ -1,93 +1,216 @@
-# Compiladores_Diego_Safar
+# Sistema de Control Robótico vía WebSockets
 
+Proyecto de Compiladores: Sistema de comunicación segura y procesamiento de lenguajes para controlar un vehículo robótico basado en ESP32.
 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Arquitectura
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/diego_safar_compiladores/compiladores_diego_safar.git
-git branch -M main
-git push -uf origin main
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
+│   FRONTEND      │     │    BACKEND       │     │   ESP32     │
+│   (SPA)         │◄───►│   (Node.js)      │◄───►│   (Robot)   │
+│   Puerto 8080   │ WS  │   Puerto 3000    │ WS  │  Puerto 8081│
+└─────────────────┘     └──────────────────┘     └─────────────┘
 ```
 
-## Integrate with your tools
+## Components
 
-* [Set up project integrations](https://gitlab.com/diego_safar_compiladores/compiladores_diego_safar/-/settings/integrations)
+### Frontend (Cliente Web)
+- **Transmisor**: Panel del operador con input de comandos, video player, logs
+- **Receptor**: Panel de auditoría ciega con desglose del autómata por primos
 
-## Collaborate with your team
+### Backend (Servidor)
+- **Parser**: Validación sintáctica y semántica de comandos
+- **Autómata de Residuos**: AFD para verificar divisibilidad por 6 primos
+- **Encriptador**: Tabla de 48 números autorizados (6 por comando)
+- **Servicios WebSocket**: Gestión de conexiones Transmisor/Receptor/ESP32
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### Comandos
 
-## Test and Deploy
+| Comando | Acción | Carácter ESP32 |
+|---------|--------|----------------|
+| `A:x` | Avanzar | `W` |
+| `R:x` | Retroceder | `B` |
+| `D:x` | Girar Derecha | `R` |
+| `I:x` | Girar Izquierda | `L` |
+| `O` | Abrir Pinza | `O` |
+| `C` | Cerrar Pinza | `C` |
+| `P` | Encender Cámara | `P` |
+| `F` | Apagar Cámara | `F` |
 
-Use the built-in continuous integration in GitLab.
+Donde `x` es un dígito del 1 al 9 (repetición).
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+### Ejemplo de programa
+```
+P, A:3, R:2, D, O, C, F
+```
 
-***
+## Primos Autorizados
 
-# Editing this README
+| Primo | Uso |
+|-------|-----|
+| 41 | Verificación de autenticidad |
+| 43 | Verificación de autenticidad |
+| 47 | Verificación de autenticidad |
+| 53 | Verificación de autenticidad |
+| 59 | Verificación de autenticidad |
+| 61 | Verificación de autenticidad |
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### Clasificación de mensajes
+- **VÁLIDO**: Número en tabla y divisible por exactamente 1 primo
+- **FALSO**: Número no en tabla o no divisible por ningún primo
+- **CORRUPTO**: Número divisible por 2 o más primos
 
-## Suggestions for a good README
+## Instalación
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### Requisitos
+- Node.js 18+ 
+- npm
 
-## Name
-Choose a self-explaining name for your project.
+### Pasos
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```bash
+# 1. Clonar el repositorio
+git clone https://gitlab.com/diego_safar_compiladores/compiladores_diego_safar.git
+cd compiladores_diego_safar
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+# 2. Instalar dependencias
+npm install
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+# 3. Iniciar el sistema completo
+npm start
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Esto iniciará:
+- **Backend**: ws://localhost:3000
+- **Frontend**: http://localhost:8080
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### Alternativa Windows
+Doble clic en `start.bat`
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## Uso
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### Modo Transmisor
+1. Abrir http://localhost:8080
+2. Seleccionar "Transmisor" en el navbar
+3. Escribir programa de comandos (ej: `P, A:3, R:2, D, O, C, F`)
+4. Presionar "Ejecutar Programa"
+5. Ver logs de confirmación en la consola
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Modo Receptor
+1. Abrir http://localhost:8080
+2. Seleccionar "Receptor" en el navbar
+3. Ingresar IP y puerto de la ESP32
+4. Presionar "Conectar ESP32"
+5. Ver logs de auditoría y desglose del autómata
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### Con Simulador de ESP32
+```bash
+# Terminal 1: Iniciar simulador
+cd simulador
+npm start
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+# Terminal 2: Iniciar sistema completo
+npm start
+```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Luego en el Receptor, conectar a `127.0.0.1:8081`.
 
-## License
-For open source projects, say how it is licensed.
+## Estructura del Proyecto
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```
+Proyecto_Compiladores/
+├── package.json              # Script maestro
+├── start.bat                 # Inicio rápido Windows
+├── README.md                 # Esta documentación
+├── Backend/
+│   ├── package.json
+│   ├── server.js             # Servidor WebSocket
+│   └── src/
+│       ├── core/
+│       │   ├── parser.js     # Lexer/Sintáctico
+│       │   ├── automatas.js  # AFD de residuos
+│       │   └── encriptador.js# Tabla de números
+│       ├── services/
+│       │   ├── transmisorService.js
+│       │   └── receptorService.js
+│       └── utils/logger.js
+├── Frontend/
+│   ├── package.json
+│   ├── server.js             # Servidor estáticos
+│   ├── index.html
+│   ├── css/style.css
+│   └── js/
+│       ├── app.js
+│       ├── ws-manager.js
+│       └── views/
+│           ├── transmitterView.js
+│           └── receiverView.js
+└── simulador/
+    ├── package.json
+    └── esp32-simulator.js    # Simulador de ESP32
+```
+
+## WebSocket API
+
+### Rutas del Backend
+| Ruta | Descripción |
+|------|-------------|
+| `/ws/transmitter` | Canal del Transmisor |
+| `/ws/receiver` | Canal del Receptor |
+| `/ws/esp32` | Conexión de ESP32 |
+
+### Mensajes
+
+#### Transmisor → Backend
+```json
+{
+  "type": "COMMAND",
+  "command": "W",
+  "commandName": "Avanzar",
+  "step": 1,
+  "total": 3,
+  "ackId": "uuid"
+}
+```
+
+#### Backend → Transmisor
+```json
+{
+  "type": "CONFIRMACION_COMANDO",
+  "message": "OK_AVANZAR:1",
+  "encryptedNumber": 1025,
+  "classification": "VALIDO",
+  "ackId": "uuid"
+}
+```
+
+#### Backend → ESP32
+```json
+{
+  "type": "COMMAND",
+  "command": "W"
+}
+```
+
+#### ESP32 → Backend
+```json
+{
+  "type": "RESPONSE",
+  "data": "Avanzar 15cm ejecutado"
+}
+```
+
+## Tecnologías
+
+- **Backend**: Node.js, WebSocket (ws), ES Modules
+- **Frontend**: HTML5, CSS3, JavaScript vanilla
+- **Protocolo**: WebSocket (ws://)
+- **Autenticidad**: Autómata de residuos módulo n
+
+## Autor
+
+Diego Safar
+
+## Licencia
+
+MIT

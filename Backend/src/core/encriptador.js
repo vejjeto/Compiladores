@@ -1,14 +1,14 @@
-import { divisibilityAutomaton, getClassificationResults, countDivisibilities } from './automatas.js';
+import { divisibilityAutomaton, getClassificationResults, countDivisibilities, PRIMES } from './automatas.js';
 
 export const NUMBER_TABLE = {
-  A: { numbers: [1024, 1032, 1040, 1048, 1056, 1064], prime: 2, name: 'Avanzar' },
-  R: { numbers: [1002, 1005, 1008, 1011, 1014, 1098], prime: 3, name: 'Retroceder' },
-  D: { numbers: [1100, 1105, 1110, 1115, 1120, 1125], prime: 5, name: 'Girar Derecha' },
-  I: { numbers: [1141, 1148, 1155, 1162, 1169, 1176], prime: 7, name: 'Girar Izquierda' },
-  O: { numbers: [1199, 1210, 1221, 1232, 1243, 1254], prime: 11, name: 'Abrir Pinza' },
-  F: { numbers: [1235, 1248, 1261, 1274, 1287, 1300], prime: 13, name: 'Apagar Cámara' },
-  P: { numbers: [1275, 1292, 1309, 1326, 1343, 1360], prime: 17, name: 'Encender Cámara' },
-  C: { numbers: [1311, 1330, 1349, 1368, 1387, 1406], prime: 19, name: 'Cerrar Pinza' }
+  A: { numbers: [1025, 1032, 1034, 1060, 1062, 1037], name: 'Avanzar' },
+  R: { numbers: [1066, 1075, 1081, 1007, 1003, 1098], name: 'Retroceder' },
+  D: { numbers: [1107, 1118, 1128, 1113, 1121, 1159], name: 'Girar Derecha' },
+  I: { numbers: [1148, 1161, 1175, 1166, 1180, 1220], name: 'Girar Izquierda' },
+  O: { numbers: [1189, 1204, 1222, 1219, 1239, 1281], name: 'Abrir Pinza' },
+  F: { numbers: [1230, 1247, 1269, 1272, 1298, 1342], name: 'Apagar Cámara' },
+  P: { numbers: [1271, 1290, 1316, 1325, 1357, 1403], name: 'Encender Cámara' },
+  C: { numbers: [1312, 1333, 1363, 1378, 1416, 1464], name: 'Cerrar Pinza' }
 };
 
 const ALL_NUMBERS = [];
@@ -28,15 +28,14 @@ export function selectRandomNumber(command) {
 export function getCommandByNumber(number) {
   for (const [cmd, data] of Object.entries(NUMBER_TABLE)) {
     if (data.numbers.includes(number)) {
-      return { command: cmd, prime: data.prime, name: data.name };
+      return { command: cmd, name: data.name };
     }
   }
   return null;
 }
 
 export function getPrimeForCommand(command) {
-  const data = NUMBER_TABLE[command];
-  return data ? data.prime : null;
+  return null;
 }
 
 export function classifyNumber(number) {
@@ -47,7 +46,6 @@ export function classifyNumber(number) {
   let classifiedAs;
   let command = null;
   let details = '';
-  let prime = null;
 
   if (!inTable) {
     classifiedAs = 'FALSO';
@@ -55,16 +53,14 @@ export function classifyNumber(number) {
   } else if (divisibleCount === 1) {
     classifiedAs = 'VALIDO';
     command = inTable.command;
-    prime = inTable.prime;
-    details = `Divisible por ${inTable.prime} → ${inTable.name}`;
+    const divisiblePrime = PRIMES.find(p => results[p]);
+    details = `Divisible por ${divisiblePrime} → ${inTable.name}`;
   } else if (divisibleCount === 0) {
     classifiedAs = 'FALSO';
     details = `Número ${number} en tabla pero no divisible por ningún primo`;
   } else {
     classifiedAs = 'CORRUPTO';
-    const divisors = Object.entries(results)
-      .filter(([_, v]) => v)
-      .map(([k]) => k);
+    const divisors = PRIMES.filter(p => results[p]);
     details = `Divisible por ${divisibleCount} primos: [${divisors.join(', ')}]`;
   }
 
@@ -73,7 +69,6 @@ export function classifyNumber(number) {
     results,
     classifiedAs,
     command,
-    prime,
     details,
     divisibleCount,
     inTable: !!inTable
