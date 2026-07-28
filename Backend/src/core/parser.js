@@ -1,5 +1,5 @@
 const COMMAND_MAP = {
-  A: { esp32: 'F', name: 'Avanzar', type: 'movement' },
+  A: { esp32: 'W', name: 'Avanzar', type: 'movement' },
   R: { esp32: 'B', name: 'Retroceder', type: 'movement' },
   D: { esp32: 'R', name: 'Girar Derecha', type: 'movement' },
   I: { esp32: 'L', name: 'Girar Izquierda', type: 'movement' },

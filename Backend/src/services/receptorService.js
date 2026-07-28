@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
 import { info, warn, error, success, event } from '../utils/logger.js';
 import { classifyNumber } from '../core/encriptador.js';
@@ -10,7 +11,7 @@ export class ReceptorService {
   constructor() {
     this.receiverClients = new Map();
     this.esp32Clients = new Map();
-    this.pendingESP32Messages = [];
+    this.activeSequences = new Map();
   }
 
   handleReceiverConnection(ws, req) {
@@ -85,6 +86,10 @@ export class ReceptorService {
 
       case 'SEND_TO_ESP32':
         this.sendToESP32(clientId, message.command, message.ackId);
+        break;
+
+      case 'SEND_SEQUENCE':
+        this.handleSendSequence(clientId, message.sequence, message.ackId);
         break;
 
       case 'PROCESS_NUMBER':
@@ -178,12 +183,13 @@ export class ReceptorService {
         command
       }));
 
+      const serverAckId = uuidv4();
       if (ackId) {
         this.sendToReceiver(receiverId, {
           type: 'ESP_SEND_OK',
           message: `Comando '${command}' enviado a ESP32`,
           command,
-          ackId
+          ackId: serverAckId
         });
       }
 
@@ -197,6 +203,128 @@ export class ReceptorService {
           ackId
         });
       }
+    }
+  }
+
+  handleSendSequence(receiverId, sequence, ackId) {
+    const espClient = this.findESP32ForReceiver(receiverId);
+
+    if (!espClient || espClient.ws.readyState !== WebSocket.OPEN) {
+      warn(COMPONENT, `No hay conexión con ESP32 para enviar secuencia [${receiverId}]`);
+
+      if (ackId) {
+        this.sendToReceiver(receiverId, {
+          type: 'SEQUENCE_ERROR',
+          message: 'No hay conexión con la ESP32',
+          ackId
+        });
+      }
+      return;
+    }
+
+    const sequenceId = uuidv4();
+    this.activeSequences.set(sequenceId, {
+      receiverId,
+      espClient,
+      sequence,
+      currentIndex: 0,
+      startedAt: new Date()
+    });
+
+    info(COMPONENT, `Iniciando secuencia [${sequenceId}]: ${sequence.length} pasos con ${ESP_COMMAND_DELAY}ms de delay`);
+
+    const serverAckId = uuidv4();
+    if (ackId) {
+      this.sendToReceiver(receiverId, {
+        type: 'SEQUENCE_STARTED',
+        sequenceId,
+        totalSteps: sequence.length,
+        ackId: serverAckId
+      });
+    }
+
+    this.executeSequenceStep(sequenceId);
+  }
+
+  executeSequenceStep(sequenceId) {
+    const seq = this.activeSequences.get(sequenceId);
+
+    if (!seq) return;
+
+    if (seq.currentIndex >= seq.sequence.length) {
+      const duration = Date.now() - seq.startedAt.getTime();
+      info(COMPONENT, `Secuencia [${sequenceId}] completada en ${duration}ms`);
+
+      this.sendToReceiver(seq.receiverId, {
+        type: 'SEQUENCE_COMPLETED',
+        sequenceId,
+        totalSteps: seq.sequence.length,
+        duration
+      });
+
+      this.activeSequences.delete(sequenceId);
+      return;
+    }
+
+    const cmd = seq.sequence[seq.currentIndex];
+
+    info(COMPONENT, `Secuencia [${sequenceId}] paso ${seq.currentIndex + 1}/${seq.sequence.length}: '${cmd.char}' (${cmd.name})`);
+
+    try {
+      seq.espClient.ws.send(JSON.stringify({
+        type: 'COMMAND',
+        command: cmd.char
+      }));
+
+      this.sendToReceiver(seq.receiverId, {
+        type: 'SEQUENCE_STEP_SENT',
+        sequenceId,
+        step: seq.currentIndex + 1,
+        total: seq.sequence.length,
+        command: cmd.char,
+        commandName: cmd.name
+      });
+
+      this.broadcastToReceivers({
+        type: 'AUDIT_LOG',
+        number: null,
+        classification: 'COMANDO_DIRECTO',
+        command: cmd.command,
+        details: `Paso ${seq.currentIndex + 1}: '${cmd.char}' → ${cmd.name}`,
+        results: null,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (err) {
+      error(COMPONENT, `Error en secuencia [${sequenceId}] paso ${seq.currentIndex + 1}`, { error: err.message });
+
+      this.sendToReceiver(seq.receiverId, {
+        type: 'SEQUENCE_ERROR',
+        sequenceId,
+        message: err.message,
+        step: seq.currentIndex + 1
+      });
+
+      this.activeSequences.delete(sequenceId);
+      return;
+    }
+
+    seq.currentIndex++;
+
+    if (seq.currentIndex < seq.sequence.length) {
+      setTimeout(() => this.executeSequenceStep(sequenceId), ESP_COMMAND_DELAY);
+    } else {
+      const duration = Date.now() - seq.startedAt.getTime();
+      info(COMPONENT, `Secuencia [${sequenceId}] completada en ${duration}ms`);
+
+      this.sendToReceiver(seq.receiverId, {
+        type: 'SEQUENCE_COMPLETED',
+        sequenceId,
+        totalSteps: seq.sequence.length,
+        duration
+      });
+
+      this.activeSequences.delete(sequenceId);
     }
   }
 
@@ -225,10 +353,11 @@ export class ReceptorService {
 
     info(COMPONENT, `Número ${number} clasificado como: ${classification.classifiedAs}`);
 
+    const serverAckId = uuidv4();
     this.sendToReceiver(receiverId, {
       type: 'CLASSIFICATION_RESULT',
       ...classification,
-      ackId
+      ackId: serverAckId
     });
 
     this.broadcastToReceivers({
@@ -240,30 +369,6 @@ export class ReceptorService {
       results: classification.results,
       timestamp: new Date().toISOString()
     });
-  }
-
-  sendCommandWithDelay(espClient, commands) {
-    let i = 0;
-
-    const sendNext = () => {
-      if (i >= commands.length) return;
-
-      const cmd = commands[i];
-      info(COMPONENT, `Enviando paso ${i + 1}/${commands.length}: '${cmd.char}' (${cmd.name})`);
-
-      espClient.ws.send(JSON.stringify({
-        type: 'COMMAND',
-        command: cmd.char
-      }));
-
-      i++;
-
-      if (i < commands.length) {
-        setTimeout(sendNext, ESP_COMMAND_DELAY);
-      }
-    };
-
-    sendNext();
   }
 
   findESP32ForReceiver(receiverId) {
@@ -292,6 +397,6 @@ export class ReceptorService {
   }
 
   generateId(prefix) {
-    return `${prefix}-${Math.random().toString(36).substring(2, 10)}`;
+    return `${prefix}-${uuidv4().substring(0, 8)}`;
   }
 }

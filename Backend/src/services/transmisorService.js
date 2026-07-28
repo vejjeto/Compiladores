@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { info, warn, error, success, event } from '../utils/logger.js';
 import { parseCommands } from '../core/parser.js';
 import { classifyNumber, selectRandomNumber } from '../core/encriptador.js';
@@ -33,7 +34,8 @@ export class TransmisorService {
       error(COMPONENT, `Error en transmisor [${clientId}]`, { error: err.message });
     });
 
-    this.sendACK(ws, null, {
+    const serverAckId = uuidv4();
+    this.sendACK(ws, serverAckId, {
       type: 'CONNECTED',
       message: 'Conexión establecida con el servidor backend',
       clientId
@@ -59,10 +61,12 @@ export class TransmisorService {
 
     info(COMPONENT, `Comando [${clientId}]: '${command}' (${commandName}) paso ${step}/${total}`);
 
-    const randomNum = selectRandomNumber(this.getCommandFromChar(command));
+    const commandChar = this.getCommandFromChar(command);
+    const randomNum = selectRandomNumber(commandChar);
     const classification = randomNum ? classifyNumber(randomNum) : null;
 
-    this.sendACK(ws, ackId, {
+    const serverAckId = uuidv4();
+    this.sendACK(ws, ackId || serverAckId, {
       type: 'CONFIRMACION_COMANDO',
       message: `OK_${commandName?.toUpperCase().replace(/\s/g, '_')}:${step}`,
       command,
@@ -80,7 +84,8 @@ export class TransmisorService {
 
     info(COMPONENT, `Programa parseado [${clientId}]: ${parsed.commands.length} comandos, válido: ${parsed.valid}`);
 
-    this.sendACK(ws, ackId, {
+    const serverAckId = uuidv4();
+    this.sendACK(ws, ackId || serverAckId, {
       type: 'PARSE_RESULT',
       ...parsed
     });
@@ -92,7 +97,8 @@ export class TransmisorService {
 
     info(COMPONENT, `Clasificación [${clientId}]: ${number} → ${classification.classifiedAs}`);
 
-    this.sendACK(ws, ackId, {
+    const serverAckId = uuidv4();
+    this.sendACK(ws, ackId || serverAckId, {
       type: 'CLASSIFICATION_RESULT',
       ...classification
     });
@@ -100,7 +106,7 @@ export class TransmisorService {
 
   sendACK(ws, ackId, data) {
     if (ws.readyState === ws.OPEN) {
-      const payload = ackId ? { ...data, ackId } : data;
+      const payload = { ...data, ackId: ackId || uuidv4() };
       ws.send(JSON.stringify(payload));
     }
   }
@@ -115,11 +121,11 @@ export class TransmisorService {
   }
 
   getCommandFromChar(char) {
-    const map = { F: 'A', B: 'R', R: 'D', L: 'I', O: 'O', C: 'C', P: 'P' };
+    const map = { W: 'A', F: 'A', B: 'R', R: 'D', L: 'I', O: 'O', C: 'C', P: 'P' };
     return map[char] || char;
   }
 
   generateId() {
-    return 'tx-' + Math.random().toString(36).substring(2, 10);
+    return 'tx-' + uuidv4().substring(0, 8);
   }
 }

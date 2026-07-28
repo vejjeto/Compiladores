@@ -15,7 +15,7 @@ class TransmitterView {
     this.commandHistory = [];
 
     this.COMMAND_MAP = {
-      A: { esp32: 'F', name: 'Avanzar' },
+      A: { esp32: 'W', name: 'Avanzar' },
       R: { esp32: 'B', name: 'Retroceder' },
       D: { esp32: 'R', name: 'Girar Derecha' },
       I: { esp32: 'L', name: 'Girar Izquierda' },

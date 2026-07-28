@@ -9,9 +9,15 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
+    "uuid": "^14.0.1",
     "ws": "^8.16.0"
   },
-  "keywords": ["robotics", "websocket", "compilers", "automata"],
+  "keywords": [
+    "robotics",
+    "websocket",
+    "compilers",
+    "automata"
+  ],
   "author": "Diego Safar",
   "license": "MIT"
 }

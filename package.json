@@ -1,0 +1,15 @@
+{
+  "name": "proyecto-compiladores",
+  "version": "1.0.0",
+  "description": "Sistema de Control Robótico vía WebSockets",
+  "private": true,
+  "scripts": {
+    "start": "concurrently \"npm start --prefix Backend\" \"npm start --prefix Frontend\"",
+    "start:backend": "npm start --prefix Backend",
+    "start:frontend": "npm start --prefix Frontend",
+    "install:all": "npm install --prefix Backend && npm install --prefix Frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
