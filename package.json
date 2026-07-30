@@ -7,7 +7,8 @@
     "start": "concurrently \"npm start --prefix Backend\" \"npm start --prefix Frontend\"",
     "start:backend": "npm start --prefix Backend",
     "start:frontend": "npm start --prefix Frontend",
-    "install:all": "npm install --prefix Backend && npm install --prefix Frontend && npm install"
+    "install:all": "npm install --prefix Backend && npm install --prefix Frontend && npm install",
+    "test": "npm test --prefix Backend"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"
