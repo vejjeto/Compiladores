@@ -15,6 +15,9 @@ Desktop.ini
 *.swp
 *.swo
 
+# Certificados SSL (generados localmente)
+certs/
+
 # Variables de entorno
 .env
 .env.local

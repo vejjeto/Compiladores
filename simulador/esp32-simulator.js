@@ -1,7 +1,13 @@
+import { readFileSync } from 'fs';
 import { WebSocketServer } from 'ws';
+import { createServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 8081;
-const wss = new WebSocketServer({ port: PORT, path: '/ws' });
+const WSS_PORT = 8082;
 
 const COMMAND_ACTIONS = {
   W: 'Avanzar 15cm',
@@ -14,15 +20,10 @@ const COMMAND_ACTIONS = {
   F: 'Cámara Apagada'
 };
 
-console.log('╔══════════════════════════════════════════╗');
-console.log('║   SIMULADOR DE ESP32 - Compiladores      ║');
-console.log('║   WebSocket Server en puerto 8081        ║');
-console.log('╚══════════════════════════════════════════╝');
-console.log(`\nEsperando conexiones en ws://localhost:${PORT}/ws\n`);
-
-wss.on('connection', (ws, req) => {
+function handleConnection(ws, req) {
   const clientIp = req.socket.remoteAddress;
-  console.log(`[+] Nueva conexión desde ${clientIp}`);
+  const protocol = req.socket.encrypted ? 'wss' : 'ws';
+  console.log(`[+] Nueva conexión ${protocol} desde ${clientIp}`);
 
   ws.on('message', (data) => {
     try {
@@ -60,19 +61,46 @@ wss.on('connection', (ws, req) => {
     data: 'ESP32 Simulador conectado y listo',
     timestamp: new Date().toISOString()
   }));
+}
+
+console.log('╔══════════════════════════════════════════╗');
+console.log('║   SIMULADOR DE ESP32 - Compiladores      ║');
+console.log('╚══════════════════════════════════════════╝');
+
+// WS server
+const httpServer = createServer();
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+wss.on('connection', handleConnection);
+httpServer.listen(PORT, () => {
+  console.log(`  WS  → ws://localhost:${PORT}/ws`);
 });
 
-wss.on('error', (err) => {
-  console.error(`[ERR] Error en servidor WebSocket: ${err.message}`);
-  if (err.code === 'EADDRINUSE') {
-    console.error(`[!] El puerto ${PORT} ya está en uso. Cerrá el otro proceso.`);
-  }
-});
+// WSS server (solo si hay certificados)
+const certPath = join(__dirname, '..', 'certs', 'cert.pem');
+const keyPath = join(__dirname, '..', 'certs', 'key.pem');
+
+let certFound = false;
+try {
+  if (readFileSync(certPath) && readFileSync(keyPath)) certFound = true;
+} catch { /* sin certificados */ }
+
+if (certFound) {
+  const httpsServer = createHttpsServer({
+    key: readFileSync(keyPath),
+    cert: readFileSync(certPath)
+  });
+  const wsss = new WebSocketServer({ server: httpsServer, path: '/ws' });
+  wsss.on('connection', handleConnection);
+  httpsServer.listen(WSS_PORT, () => {
+    console.log(`  WSS → wss://localhost:${WSS_PORT}/ws`);
+  });
+}
+
+console.log(`\nEsperando conexiones...\n`);
 
 process.on('SIGINT', () => {
   console.log('\n[!] Cerrando simulador...');
   wss.close(() => {
-    console.log('[OK] Simulador cerrado correctamente');
     process.exit(0);
   });
 });

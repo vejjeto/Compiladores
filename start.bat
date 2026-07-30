@@ -12,7 +12,7 @@ call npm install --prefix Frontend
 call npm install
 echo.
 echo Iniciando servidores...
-echo   Backend:  ws://localhost:3000
-echo   Frontend: http://localhost:8080
+echo   Backend:  ws://localhost:3000  /  wss://localhost:3443
+echo   Frontend: http://localhost:8080  /  https://localhost:8443
 echo.
 call npx concurrently "npm start --prefix Backend" "npm start --prefix Frontend"

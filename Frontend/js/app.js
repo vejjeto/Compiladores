@@ -20,10 +20,13 @@ class App {
       });
     });
 
-    const backendUrl = `ws://${window.location.hostname}:3000/ws/transmitter`;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const backendPort = window.location.protocol === 'https:' ? '3443' : '3000';
+    const backendUrl = `${wsProtocol}//${window.location.hostname}:${backendPort}/ws/transmitter`;
     this.transmitterView.initWebSocket(backendUrl);
 
     this.transmitterView.addLog('Sistema inicializado', 'info');
+    this.transmitterView.addLog('Conectando al backend...', 'info');
     this.transmitterView.addLog('Seleccione un programa de comandos y presione "Ejecutar"', 'info');
     this.receiverView.addAuditLog('Sistema de auditoría inicializado', 'info');
     this.receiverView.addAuditLog('Conecte la ESP32 para recibir datos', 'info');
