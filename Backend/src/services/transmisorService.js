@@ -121,7 +121,7 @@ export class TransmisorService {
   }
 
   getCommandFromChar(char) {
-    const map = { W: 'A', F: 'A', B: 'R', R: 'D', L: 'I', O: 'O', C: 'C', P: 'P' };
+    const map = { W: 'A', B: 'R', R: 'D', L: 'I', O: 'O', C: 'C', P: 'P', F: 'F' };
     return map[char] || char;
   }
 

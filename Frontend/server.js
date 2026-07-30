@@ -19,6 +19,13 @@ const server = http.createServer((req, res) => {
   let filePath = req.url === '/' ? '/index.html' : req.url;
   filePath = path.join(__dirname, filePath);
 
+  const resolvedPath = path.resolve(filePath);
+  if (!resolvedPath.startsWith(__dirname)) {
+    res.writeHead(403);
+    res.end('Acceso denegado');
+    return;
+  }
+
   const ext = path.extname(filePath);
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 

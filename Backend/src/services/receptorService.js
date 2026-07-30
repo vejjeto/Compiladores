@@ -101,7 +101,7 @@ export class ReceptorService {
     }
   }
 
-  connectToESP32(receiverId, ip, port = 8080) {
+  connectToESP32(receiverId, ip, port = 8081) {
     const wsUrl = `ws://${ip}:${port}/ws`;
     info(COMPONENT, `Conectando a ESP32 en ${wsUrl}`);
 

@@ -118,7 +118,6 @@ class WSManager {
     this.onReconnecting(this.reconnectAttempts);
 
     setTimeout(() => {
-      this.maxReconnectAttempts = 5;
       this.connect();
     }, delay);
   }

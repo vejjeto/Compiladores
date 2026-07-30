@@ -207,7 +207,8 @@ class TransmitterView {
     if (data.type === 'CONFIRMACION_COMANDO') {
       this.addLog(`Confirmación recibida: ${data.message}`, 'valid');
     } else if (data.type === 'AUDIT_LOG') {
-      window.app.receiverView.addAuditLog(data);
+      const logMessage = data.details || `Número: ${data.number} → ${data.classification}`;
+      window.app.receiverView.addAuditLog(logMessage, data.classification?.toLowerCase());
     }
   }
 
