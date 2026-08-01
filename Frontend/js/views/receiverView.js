@@ -3,8 +3,7 @@ class ReceiverView {
     this.backendUrl = backendUrl;
     this.eventSource = null;
 
-    this.espIpInput = document.getElementById('rx-esp-ip');
-    this.espPortInput = document.getElementById('rx-esp-port');
+    this.espUrlInput = document.getElementById('rx-esp-url');
     this.connectBtn = document.getElementById('rx-connect-btn');
     this.disconnectBtn = document.getElementById('rx-disconnect-btn');
     this.logConsole = document.getElementById('rx-log-console');
@@ -111,11 +110,25 @@ class ReceiverView {
   }
 
   async connectToCar() {
-    const ip = this.espIpInput.value.trim();
-    const port = parseInt(this.espPortInput.value, 10) || 80;
+    const urlStr = this.espUrlInput.value.trim();
 
-    if (!ip) {
-      this.addAuditLog('Error: Ingrese la dirección IP del carro', 'invalid');
+    if (!urlStr) {
+      this.addAuditLog('Error: Ingrese la URL WebSocket del carro (ej: ws://10.23.212.225/ws)', 'invalid');
+      return;
+    }
+
+    let ip;
+    let port = 80;
+
+    try {
+      const url = new URL(urlStr);
+      if (!['ws:', 'wss:'].includes(url.protocol)) {
+        throw new Error('Protocolo inválido');
+      }
+      ip = url.hostname;
+      port = url.port ? parseInt(url.port, 10) : (url.protocol === 'wss:' ? 443 : 80);
+    } catch {
+      this.addAuditLog('Error: URL inválida. Formato esperado: ws://IP[:PUERTO]/ws', 'invalid');
       return;
     }
 
