@@ -7,6 +7,8 @@ workflow:
   auto_cancel:
     on_new_commit: interruptible
 
+image: node:20
+
 stages:
   - lint
   - test
@@ -14,6 +16,7 @@ stages:
 lint:
   stage: lint
   script:
+    - npm install --prefix Backend
     - node --check Frontend/server.js
     - node -e "import('./Backend/src/core/parser.js'); import('./Backend/src/core/automatas.js'); import('./Backend/src/core/encriptador.js'); import('./Backend/src/services/carService.js'); import('./Backend/src/services/auditService.js'); import('./Backend/src/services/transmisorService.js')"
   rules:
