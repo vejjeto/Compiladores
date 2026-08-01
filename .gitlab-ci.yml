@@ -11,6 +11,7 @@ image: node:20
 
 stages:
   - lint
+  - build
   - test
 
 lint:
@@ -19,6 +20,20 @@ lint:
     - npm install --prefix Backend
     - node --check Frontend/server.js
     - node -e "import('./Backend/src/core/parser.js'); import('./Backend/src/core/automatas.js'); import('./Backend/src/core/encriptador.js'); import('./Backend/src/services/carService.js'); import('./Backend/src/services/auditService.js'); import('./Backend/src/services/transmisorService.js')"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+build:
+  stage: build
+  script:
+    - npm install --prefix Backend
+    - echo "Compilando proyecto..."
+    - node -e "import('./Backend/server.js')"
+    - node --check Frontend/js/app.js
+    - node --check Frontend/js/views/transmitterView.js
+    - node --check Frontend/js/views/receiverView.js
+    - node --check simulador/esp32-simulator.js
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
