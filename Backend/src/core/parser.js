@@ -1,16 +1,17 @@
 const COMMAND_MAP = {
-  A: { esp32: 'W', name: 'Avanzar', type: 'movement' },
+  A: { esp32: 'F', name: 'Avanzar', type: 'movement' },
   R: { esp32: 'B', name: 'Retroceder', type: 'movement' },
   D: { esp32: 'R', name: 'Girar Derecha', type: 'movement' },
   I: { esp32: 'L', name: 'Girar Izquierda', type: 'movement' },
   O: { esp32: 'O', name: 'Abrir Pinza', type: 'action' },
   C: { esp32: 'C', name: 'Cerrar Pinza', type: 'action' },
-  P: { esp32: 'P', name: 'Encender Cámara', type: 'camera' },
-  F: { esp32: 'F', name: 'Apagar Cámara', type: 'camera' }
+  P: { esp32: 'N', name: 'Encender Cámara', type: 'camera' },
+  F: { esp32: 'P', name: 'Apagar Cámara', type: 'camera' },
+  M: { esp32: 'M', name: 'Liberar Control', type: 'action' }
 };
 
 const MOVEMENT_COMMANDS = ['A', 'R', 'D', 'I'];
-const ACTION_COMMANDS = ['P', 'F', 'O', 'C'];
+const ACTION_COMMANDS = ['P', 'F', 'O', 'C', 'M'];
 const COMMAND_REGEX = /^([A-Z])(?::([1-9]))?$/;
 
 export function parseCommands(inputString) {
@@ -23,19 +24,6 @@ export function parseCommands(inputString) {
 
   const tokens = raw.split(',').map(t => t.trim()).filter(t => t.length > 0);
   const commands = [];
-
-  const hasP = tokens.includes('P');
-  const hasF = tokens.includes('F');
-  const pIndex = tokens.indexOf('P');
-  const fIndex = tokens.lastIndexOf('F');
-
-  if (hasP && pIndex !== 0) {
-    errors.push(`Error semántico: 'P' debe ser el primer comando (posición actual: ${pIndex + 1})`);
-  }
-
-  if (hasF && fIndex !== tokens.length - 1) {
-    errors.push(`Error semántico: 'F' debe ser el último comando (posición actual: ${fIndex + 1})`);
-  }
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
@@ -53,11 +41,6 @@ export function parseCommands(inputString) {
       continue;
     }
 
-    if (ACTION_COMMANDS.includes(cmd) && repStr) {
-      errors.push(`Error semántico: '${cmd}' no acepta parámetro de repetición (encontrado '${token}')`);
-      continue;
-    }
-
     const repetitions = repStr ? parseInt(repStr, 10) : 1;
     const mapping = COMMAND_MAP[cmd];
 
@@ -71,6 +54,8 @@ export function parseCommands(inputString) {
     });
   }
 
+  errors.push(...validateCommands(commands));
+
   return {
     valid: errors.length === 0,
     errors,
@@ -80,7 +65,34 @@ export function parseCommands(inputString) {
   };
 }
 
-function buildESP32Sequence(commands) {
+export function validateCommands(commands) {
+  const errors = [];
+
+  const pIndex = commands.findIndex(c => c.command === 'P');
+  const fIndex = commands.map(c => c.command).lastIndexOf('F');
+
+  if (pIndex !== -1 && pIndex !== 0) {
+    errors.push(`Error semántico: 'P' debe ser el primer comando (posición actual: ${pIndex + 1})`);
+  }
+
+  if (fIndex !== -1 && fIndex !== commands.length - 1) {
+    errors.push(`Error semántico: 'F' debe ser el último comando (posición actual: ${fIndex + 1})`);
+  }
+
+  for (let i = 0; i < commands.length; i++) {
+    const cmd = commands[i];
+
+    if (!COMMAND_MAP[cmd.command]) {
+      errors.push(`Comando desconocido '${cmd.command}' en posición ${i + 1}`);
+    } else if (ACTION_COMMANDS.includes(cmd.command) && cmd.repetitions > 1) {
+      errors.push(`Error semántico: '${cmd.command}' no acepta parámetro de repetición (encontrado '${cmd.token || cmd.command}')`);
+    }
+  }
+
+  return errors;
+}
+
+export function buildESP32Sequence(commands) {
   const sequence = [];
 
   for (const cmd of commands) {
@@ -90,7 +102,8 @@ function buildESP32Sequence(commands) {
         command: cmd.command,
         name: cmd.name,
         step: i + 1,
-        total: cmd.repetitions
+        total: cmd.repetitions,
+        ...(cmd.numero != null ? { numero: cmd.numero } : {})
       });
     }
   }

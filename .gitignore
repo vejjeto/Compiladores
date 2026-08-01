@@ -1,28 +1,18 @@
-# Dependencias de Node.js
 node_modules/
-
-# Lock files
-package-lock.json
-
-# Archivos de sistema operativo
+dist/
+build/
+coverage/
+.cache/
 .DS_Store
 Thumbs.db
 Desktop.ini
-
-# Archivos de editores
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Certificados SSL (generados localmente)
 certs/
-
-# Variables de entorno
 .env
 .env.local
 .env.*.local
-
-# Logs
 *.log
 npm-debug.log*

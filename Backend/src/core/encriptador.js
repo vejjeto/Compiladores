@@ -1,4 +1,4 @@
-import { divisibilityAutomaton, getClassificationResults, countDivisibilities, PRIMES } from './automatas.js';
+import { getClassificationResults, countDivisibilities, PRIMES } from './automatas.js';
 
 export const NUMBER_TABLE = {
   A: { numbers: [1025, 1032, 1034, 1060, 1062, 1037], name: 'Avanzar' },
@@ -8,13 +8,14 @@ export const NUMBER_TABLE = {
   O: { numbers: [1189, 1204, 1222, 1219, 1239, 1281], name: 'Abrir Pinza' },
   F: { numbers: [1230, 1247, 1269, 1272, 1298, 1342], name: 'Apagar Cámara' },
   P: { numbers: [1271, 1290, 1316, 1325, 1357, 1403], name: 'Encender Cámara' },
-  C: { numbers: [1312, 1333, 1363, 1378, 1416, 1464], name: 'Cerrar Pinza' }
+  C: { numbers: [1312, 1333, 1363, 1378, 1416, 1464], name: 'Cerrar Pinza' },
+  M: { numbers: [1353, 1376, 1410, 1431, 1475, 1525], name: 'Liberar Control' }
 };
 
-const ALL_NUMBERS = [];
+export const ALL_NUMBERS = [];
 for (const [cmd, data] of Object.entries(NUMBER_TABLE)) {
   for (const num of data.numbers) {
-    ALL_NUMBERS.push({ number: num, command: cmd, ...data });
+    ALL_NUMBERS.push({ number: num, command: cmd, name: data.name });
   }
 }
 
@@ -34,10 +35,6 @@ export function getCommandByNumber(number) {
   return null;
 }
 
-export function getPrimeForCommand(command) {
-  return null;
-}
-
 export function classifyNumber(number) {
   const inTable = getCommandByNumber(number);
   const results = getClassificationResults(number);
@@ -47,21 +44,21 @@ export function classifyNumber(number) {
   let command = null;
   let details = '';
 
-  if (!inTable) {
-    classifiedAs = 'FALSO';
-    details = `Número ${number} no pertenece a la tabla autorizada`;
-  } else if (divisibleCount === 1) {
+  if (divisibleCount >= 2) {
+    classifiedAs = 'CORRUPTO';
+    const divisors = PRIMES.filter(p => results[p]);
+    details = `Divisible por ${divisibleCount} primos: [${divisors.join(', ')}]`;
+  } else if (inTable && divisibleCount === 1) {
     classifiedAs = 'VALIDO';
     command = inTable.command;
     const divisiblePrime = PRIMES.find(p => results[p]);
     details = `Divisible por ${divisiblePrime} → ${inTable.name}`;
-  } else if (divisibleCount === 0) {
+  } else if (!inTable) {
+    classifiedAs = 'FALSO';
+    details = `Número ${number} no pertenece a la tabla autorizada`;
+  } else {
     classifiedAs = 'FALSO';
     details = `Número ${number} en tabla pero no divisible por ningún primo`;
-  } else {
-    classifiedAs = 'CORRUPTO';
-    const divisors = PRIMES.filter(p => results[p]);
-    details = `Divisible por ${divisibleCount} primos: [${divisors.join(', ')}]`;
   }
 
   return {

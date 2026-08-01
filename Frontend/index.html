@@ -8,24 +8,26 @@
 </head>
 <body>
 
-  <!-- ===== NAVBAR ===== -->
   <nav class="navbar">
     <div class="navbar-brand">
       <div class="logo">RC</div>
       <div>
         <h1>Robot Control</h1>
-        <span class="subtitle">Sistema de Control vía WebSockets</span>
+        <span class="subtitle">Sistema de Control vía HTTP + WebSocket</span>
       </div>
     </div>
     <div class="role-switch">
       <button class="role-btn active" data-role="transmitter">Transmisor</button>
       <button class="role-btn" data-role="receiver">Receptor</button>
     </div>
+    <div class="backend-config">
+      <label>Backend</label>
+      <input type="text" id="backend-url-input" placeholder="http://192.168.1.10:3000" spellcheck="false">
+      <button class="btn btn-primary" id="backend-url-apply">Aplicar</button>
+    </div>
   </nav>
 
-  <!-- ===== TRANSMITTER VIEW ===== -->
   <div class="view active" id="view-transmitter">
-    <!-- Panel Izquierdo: Control + Video -->
     <div class="panel">
       <div class="panel-header">
         <h2>Consola Operadora <span class="badge badge-transmitter">TX</span></h2>
@@ -49,7 +51,7 @@
           <button class="btn btn-danger" id="tx-clear-btn">Limpiar</button>
         </div>
         <div class="video-container" id="tx-video-container">
-          <video id="tx-video-player" autoplay muted playsinline></video>
+          <img id="tx-video-player" alt="Stream de cámara">
           <div class="video-placeholder" id="tx-video-placeholder">
             <span class="icon">&#9655;</span>
             <span>Esperando comando P para iniciar stream</span>
@@ -59,7 +61,6 @@
       </div>
     </div>
 
-    <!-- Panel Derecho: Logs Transmisión -->
     <div class="panel">
       <div class="panel-header">
         <h2>Logs de Transmisión</h2>
@@ -71,20 +72,18 @@
     </div>
   </div>
 
-  <!-- ===== RECEIVER VIEW ===== -->
   <div class="view" id="view-receiver">
-    <!-- Panel Izquierdo: Auditoría -->
     <div class="panel">
       <div class="panel-header">
         <h2>Panel de Auditoría <span class="badge badge-receptor">RX</span></h2>
         <div class="status-indicator" id="rx-esp-status">
           <span class="status-dot status-disconnected"></span>
-          <span>ESP32 Desconectada</span>
+          <span>Carro Desconectado</span>
         </div>
       </div>
       <div class="panel-body">
         <div class="form-group">
-          <label>Dirección IP de la ESP32</label>
+          <label>Dirección IP del carro</label>
           <input
             type="text"
             class="form-input"
@@ -93,21 +92,34 @@
           >
         </div>
         <div class="form-group">
-          <label>Puerto WebSocket</label>
+          <label>Puerto WebSocket del carro</label>
           <input
             type="text"
             class="form-input"
             id="rx-esp-port"
-            placeholder="8080"
-            value="8080"
+            placeholder="8081"
+            value="8081"
           >
         </div>
         <div class="btn-group">
-          <button class="btn btn-primary" id="rx-connect-btn">Conectar ESP32</button>
+          <button class="btn btn-primary" id="rx-connect-btn">Conectar Carro</button>
           <button class="btn btn-danger" id="rx-disconnect-btn">Desconectar</button>
         </div>
 
-        <!-- Desglose del Autómata (se llena dinámicamente) -->
+        <div class="form-group">
+          <label>Verificar Número</label>
+          <div class="btn-group">
+            <input
+              type="text"
+              class="form-input"
+              id="rx-verify-input"
+              placeholder="Ej: 1025"
+              spellcheck="false"
+            >
+            <button class="btn btn-primary" id="rx-verify-btn">Verificar</button>
+          </div>
+        </div>
+
         <div class="audit-breakdown hidden" id="rx-audit-breakdown">
           <div class="prime-check" data-prime="41">
             <span class="check-icon check-fail">X</span>
@@ -139,7 +151,6 @@
       </div>
     </div>
 
-    <!-- Panel Derecho: Logs Auditoría -->
     <div class="panel">
       <div class="panel-header">
         <h2>Consola de Auditoría</h2>
@@ -151,8 +162,6 @@
     </div>
   </div>
 
-  <!-- ===== SCRIPTS ===== -->
-  <script src="js/ws-manager.js"></script>
   <script src="js/views/transmitterView.js"></script>
   <script src="js/views/receiverView.js"></script>
   <script src="js/app.js"></script>

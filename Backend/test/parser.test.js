@@ -21,7 +21,7 @@ describe('Parser - parseCommands', () => {
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.commands.length, 1);
     assert.strictEqual(result.commands[0].command, 'A');
-    assert.strictEqual(result.commands[0].esp32Char, 'W');
+    assert.strictEqual(result.commands[0].esp32Char, 'F');
     assert.strictEqual(result.commands[0].name, 'Avanzar');
   });
 
@@ -41,9 +41,38 @@ describe('Parser - parseCommands', () => {
   it('debe generar secuencia ESP32 correctamente', () => {
     const result = parseCommands('A:2, D');
     assert.strictEqual(result.esp32Sequence.length, 3);
-    assert.strictEqual(result.esp32Sequence[0].char, 'W');
-    assert.strictEqual(result.esp32Sequence[1].char, 'W');
+    assert.strictEqual(result.esp32Sequence[0].char, 'F');
+    assert.strictEqual(result.esp32Sequence[1].char, 'F');
     assert.strictEqual(result.esp32Sequence[2].char, 'R');
+  });
+
+  it('debe mapear cámara al protocolo real del carro (P→N, F→P)', () => {
+    const result = parseCommands('P, A, F');
+    assert.strictEqual(result.valid, true);
+    assert.strictEqual(result.esp32Sequence[0].char, 'N');
+    assert.strictEqual(result.esp32Sequence[1].char, 'F');
+    assert.strictEqual(result.esp32Sequence[2].char, 'P');
+  });
+
+  it('debe mapear todos los comandos al protocolo real del carro', () => {
+    const result = parseCommands('A, R, D, I, O, C, M, P, F');
+    const chars = result.esp32Sequence.map(s => s.char);
+    assert.deepStrictEqual(chars, ['F', 'B', 'R', 'L', 'O', 'C', 'M', 'N', 'P']);
+  });
+
+  it('debe parsear el comando M (Liberar Control)', () => {
+    const result = parseCommands('M');
+    assert.strictEqual(result.valid, true);
+    assert.strictEqual(result.commands.length, 1);
+    assert.strictEqual(result.commands[0].command, 'M');
+    assert.strictEqual(result.commands[0].esp32Char, 'M');
+    assert.strictEqual(result.commands[0].name, 'Liberar Control');
+  });
+
+  it('debe rechazar repetición en el comando M', () => {
+    const result = parseCommands('M:2');
+    assert.strictEqual(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes("no acepta parámetro de repetición")));
   });
 
   it('debe rechazar P que no sea primero', () => {
@@ -93,7 +122,7 @@ describe('Parser - getCommandInfo', () => {
 
   it('debe retornar info de comando válido', () => {
     const info = getCommandInfo('A');
-    assert.deepStrictEqual(info, { esp32: 'W', name: 'Avanzar', type: 'movement' });
+    assert.deepStrictEqual(info, { esp32: 'F', name: 'Avanzar', type: 'movement' });
   });
 
   it('debe retornar null para comando desconocido', () => {
@@ -106,7 +135,7 @@ describe('Parser - getCommandInfo', () => {
 describe('Parser - COMMAND_MAP', () => {
 
   it('debe tener todos los comandos definidos', () => {
-    const expected = ['A', 'R', 'D', 'I', 'O', 'C', 'P', 'F'];
+    const expected = ['A', 'R', 'D', 'I', 'O', 'C', 'P', 'F', 'M'];
     for (const cmd of expected) {
       assert.ok(COMMAND_MAP[cmd], `Falta comando ${cmd}`);
     }

@@ -1,14 +1,19 @@
 class App {
   constructor() {
     this.currentRole = 'transmitter';
-    this.transmitterView = new TransmitterView();
-    this.receiverView = new ReceiverView();
+    this.backendUrl = localStorage.getItem('backendUrl') || `${window.location.protocol}//${window.location.hostname}:3000`;
+
+    this.transmitterView = new TransmitterView(this.backendUrl);
+    this.receiverView = new ReceiverView(this.backendUrl);
 
     this.roleButtons = document.querySelectorAll('.role-btn');
     this.views = {
       transmitter: document.getElementById('view-transmitter'),
       receiver: document.getElementById('view-receiver')
     };
+
+    this.backendInput = document.getElementById('backend-url-input');
+    this.backendApplyBtn = document.getElementById('backend-url-apply');
 
     this.init();
   }
@@ -20,16 +25,27 @@ class App {
       });
     });
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const backendPort = window.location.protocol === 'https:' ? '3443' : '3000';
-    const backendUrl = `${wsProtocol}//${window.location.hostname}:${backendPort}/ws/transmitter`;
-    this.transmitterView.initWebSocket(backendUrl);
+    if (this.backendInput) {
+      this.backendInput.value = this.backendUrl;
+    }
+    if (this.backendApplyBtn) {
+      this.backendApplyBtn.addEventListener('click', () => this.applyBackendUrl());
+    }
 
-    this.transmitterView.addLog('Sistema inicializado', 'info');
-    this.transmitterView.addLog('Conectando al backend...', 'info');
-    this.transmitterView.addLog('Seleccione un programa de comandos y presione "Ejecutar"', 'info');
-    this.receiverView.addAuditLog('Sistema de auditoría inicializado', 'info');
-    this.receiverView.addAuditLog('Conecte la ESP32 para recibir datos', 'info');
+    this.transmitterView.addLog(`Backend configurado: ${this.backendUrl}`, 'info');
+    this.transmitterView.addLog('Seleccione un programa de comandos y presione "Ejecutar Programa"', 'info');
+    this.receiverView.addAuditLog(`Backend configurado: ${this.backendUrl}`, 'info');
+    this.receiverView.addAuditLog('Ingrese la IP del carro y presione "Conectar Carro"', 'info');
+  }
+
+  applyBackendUrl() {
+    const value = (this.backendInput.value.trim() || `${window.location.protocol}//${window.location.hostname}:3000`).replace(/\/+$/, '');
+    this.backendUrl = value;
+    localStorage.setItem('backendUrl', value);
+    this.transmitterView.updateBackendUrl(value);
+    this.receiverView.updateBackendUrl(value);
+    this.transmitterView.addLog(`Backend configurado: ${value}`, 'info');
+    this.receiverView.addAuditLog(`Backend configurado: ${value}`, 'info');
   }
 
   switchRole(role) {

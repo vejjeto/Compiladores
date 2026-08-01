@@ -1,12 +1,10 @@
 const http = require('http');
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const HTTP_PORT = 8080;
-const HTTPS_PORT = 8443;
+const HTTP_PORT = process.env.FRONTEND_PORT || 8080;
 const MIME_TYPES = {
-  '.html': 'text/html',
+  '.html': 'text/html; charset=utf-8',
   '.css': 'text/css',
   '.js': 'application/javascript',
   '.json': 'application/json',
@@ -18,11 +16,12 @@ const MIME_TYPES = {
 };
 
 function serveStatic(req, res) {
-  let filePath = req.url === '/' ? '/index.html' : req.url;
+  let filePath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   filePath = path.join(__dirname, filePath);
 
   const resolvedPath = path.resolve(filePath);
-  if (!resolvedPath.startsWith(__dirname)) {
+  const rootPath = path.resolve(__dirname);
+  if (!resolvedPath.startsWith(rootPath + path.sep) && resolvedPath !== rootPath) {
     res.writeHead(403);
     res.end('Acceso denegado');
     return;
@@ -35,7 +34,12 @@ function serveStatic(req, res) {
     if (err) {
       if (err.code === 'ENOENT') {
         fs.readFile(path.join(__dirname, 'index.html'), (e, d) => {
-          res.writeHead(200, { 'Content-Type': 'text/html' });
+          if (e) {
+            res.writeHead(500);
+            res.end('Error del servidor');
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end(d);
         });
       } else {
@@ -49,25 +53,8 @@ function serveStatic(req, res) {
   });
 }
 
-// HTTP server
 const httpServer = http.createServer(serveStatic);
-httpServer.listen(HTTP_PORT, () => {
-  console.log(`Frontend HTTP  → http://localhost:${HTTP_PORT}`);
+httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
+  console.log(`Frontend HTTP → http://0.0.0.0:${HTTP_PORT}`);
+  console.log(`Abra http://localhost:${HTTP_PORT} desde esta PC o http://IP_DE_ESTA_PC:${HTTP_PORT} desde otra`);
 });
-
-// HTTPS server (solo si existen los certificados)
-const certPath = path.join(__dirname, '..', 'certs', 'cert.pem');
-const keyPath = path.join(__dirname, '..', 'certs', 'key.pem');
-
-if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-  const httpsOptions = {
-    key: fs.readFileSync(keyPath),
-    cert: fs.readFileSync(certPath)
-  };
-  const httpsServer = https.createServer(httpsOptions, serveStatic);
-  httpsServer.listen(HTTPS_PORT, () => {
-    console.log(`Frontend HTTPS → https://localhost:${HTTPS_PORT}`);
-  });
-} else {
-  console.log('Certificados SSL no encontrados, solo se inició HTTP');
-}

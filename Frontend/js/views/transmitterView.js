@@ -1,31 +1,41 @@
 class TransmitterView {
-  constructor() {
-    this.wsManager = null;
+  constructor(backendUrl) {
+    this.backendUrl = backendUrl;
+    this.eventSource = null;
+    this.activeSequenceId = null;
+    this.numberTable = null;
+
     this.commandInput = document.getElementById('tx-command-input');
     this.executeBtn = document.getElementById('tx-execute-btn');
     this.clearBtn = document.getElementById('tx-clear-btn');
     this.clearLogsBtn = document.getElementById('tx-clear-logs-btn');
     this.logConsole = document.getElementById('tx-log-console');
     this.statusEl = document.getElementById('tx-status');
-    this.videoPlayer = document.getElementById('tx-video-player');
     this.videoPlaceholder = document.getElementById('tx-video-placeholder');
     this.videoOverlay = document.getElementById('tx-video-overlay');
+    this.videoPlayer = document.getElementById('tx-video-player');
 
     this.videoActive = false;
-    this.commandHistory = [];
-
-    this.COMMAND_MAP = {
-      A: { esp32: 'W', name: 'Avanzar' },
-      R: { esp32: 'B', name: 'Retroceder' },
-      D: { esp32: 'R', name: 'Girar Derecha' },
-      I: { esp32: 'L', name: 'Girar Izquierda' },
-      O: { esp32: 'O', name: 'Abrir Pinza' },
-      C: { esp32: 'C', name: 'Cerrar Pinza' },
-      P: { esp32: 'P', name: 'Encender Cámara' },
-      F: { esp32: 'F', name: 'Apagar Cámara' }
-    };
 
     this.bindEvents();
+    this.connectBackend();
+    this.loadNumberTable();
+  }
+
+  updateBackendUrl(url) {
+    this.backendUrl = url;
+    this.connectBackend();
+    this.loadNumberTable();
+  }
+
+  async loadNumberTable() {
+    try {
+      const res = await fetch(`${this.backendUrl}/api/tabla`);
+      const data = await res.json();
+      this.numberTable = data.tabla;
+    } catch {
+      this.numberTable = null;
+    }
   }
 
   bindEvents() {
@@ -41,17 +51,44 @@ class TransmitterView {
     });
   }
 
-  initWebSocket(wsUrl) {
-    this.wsManager = new WSManager(wsUrl, {
-      onConnect: () => this.updateStatus('connected'),
-      onDisconnect: () => this.updateStatus('disconnected'),
-      onMessage: (data) => this.handleServerMessage(data),
-      onReconnecting: (attempt) => {
-        this.updateStatus('connecting');
-        this.addLog(`Reconexión intento ${attempt}...`, 'warn');
-      }
+  connectBackend() {
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    this.updateStatus('connecting');
+
+    this.eventSource = new EventSource(`${this.backendUrl}/api/events`);
+
+    this.eventSource.onopen = () => this.updateStatus('connected');
+    this.eventSource.onerror = () => this.updateStatus('connecting');
+
+    this.eventSource.addEventListener('SEQUENCE_STARTED', (e) => {
+      const data = JSON.parse(e.data);
+      this.activeSequenceId = data.sequenceId;
+      this.addLog(`Secuencia iniciada (${data.totalSteps} pasos)`, 'command');
     });
-    this.wsManager.connect();
+
+    this.eventSource.addEventListener('STEP_SENT', (e) => {
+      const data = JSON.parse(e.data);
+      if (data.sequenceId !== this.activeSequenceId) return;
+      this.addLog(
+        `Paso ${data.step}/${data.total} → ${data.message} | N°${data.encryptedNumber} ${data.classification}`,
+        'valid'
+      );
+    });
+
+    this.eventSource.addEventListener('SEQUENCE_COMPLETED', (e) => {
+      const data = JSON.parse(e.data);
+      if (data.sequenceId !== this.activeSequenceId) return;
+      this.addLog(`Programa completado (${data.duration}ms)`, 'valid');
+    });
+
+    this.eventSource.addEventListener('SEQUENCE_ERROR', (e) => {
+      const data = JSON.parse(e.data);
+      if (data.sequenceId !== this.activeSequenceId) return;
+      this.addLog(`Error de secuencia en paso ${data.step}: ${data.message}`, 'invalid');
+    });
   }
 
   updateStatus(state) {
@@ -62,7 +99,7 @@ class TransmitterView {
     switch (state) {
       case 'connected':
         dot.classList.add('status-connected');
-        label.textContent = 'Conectado';
+        label.textContent = 'Backend conectado';
         break;
       case 'disconnected':
         dot.classList.add('status-disconnected');
@@ -75,154 +112,120 @@ class TransmitterView {
     }
   }
 
-  parseAndValidate(input) {
-    const errors = [];
-    const raw = input.trim();
+  async executeProgram() {
+    const program = this.commandInput.value;
 
-    if (!raw) {
-      errors.push('El programa está vacío');
-      return { valid: false, errors, commands: [] };
+    if (!program.trim()) {
+      this.addLog('El programa está vacío', 'invalid');
+      return;
     }
 
-    const tokens = raw.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    const commands = [];
-
-    const hasP = tokens.includes('P');
-    const hasF = tokens.includes('F');
-    const pIndex = tokens.indexOf('P');
-    const fIndex = tokens.lastIndexOf('F');
-
-    if (hasP && pIndex !== 0) {
-      errors.push(`Error semántico: 'P' debe ser el primer comando (posición actual: ${pIndex + 1})`);
+    if (!this.numberTable) {
+      await this.loadNumberTable();
+      if (!this.numberTable) {
+        this.addLog(`No se pudo obtener la tabla de números (${this.backendUrl})`, 'invalid');
+        return;
+      }
     }
 
-    if (hasF && fIndex !== tokens.length - 1) {
-      errors.push(`Error semántico: 'F' debe ser el último comando (posición actual: ${fIndex + 1})`);
-    }
+    const actionCommands = ['P', 'F', 'O', 'C', 'M'];
+    const tokens = program.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    const pasos = [];
 
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
+    for (const token of tokens) {
       const match = token.match(/^([A-Z])(?::([1-9]))?$/);
 
       if (!match) {
-        errors.push(`Token inválido '${token}' en posición ${i + 1}`);
+        this.addLog(`Token inválido '${token}'`, 'invalid');
         continue;
       }
 
       const [, cmd, repStr] = match;
-      const repetitions = repStr ? parseInt(repStr) : 1;
+      const entry = this.numberTable[cmd];
 
-      if (!this.COMMAND_MAP[cmd]) {
-        errors.push(`Comando desconocido '${cmd}' en posición ${i + 1}`);
+      if (!entry) {
+        this.addLog(`Comando desconocido '${cmd}'`, 'invalid');
         continue;
       }
 
-      if (['P', 'F', 'O', 'C'].includes(cmd) && repStr) {
-        errors.push(`Error semántico: '${cmd}' no acepta parámetro de repetición (encontrado '${token}')`);
-        continue;
-      }
-
-      if (['A', 'R', 'D', 'I'].includes(cmd) && !repStr) {
-        commands.push({ command: cmd, repetitions: 1, token });
-      } else {
-        commands.push({ command: cmd, repetitions, token });
-      }
+      const repetitions = actionCommands.includes(cmd) ? 1 : (repStr ? parseInt(repStr, 10) : 1);
+      const numero = entry.numbers[Math.floor(Math.random() * entry.numbers.length)];
+      pasos.push({ numero, repeticiones: repetitions });
+      this.addLog(`N°${numero} ×${repetitions} → ${entry.name} (${cmd})`, 'command');
     }
 
-    return {
-      valid: errors.length === 0,
-      errors,
-      commands,
-      raw,
-      esp32Sequence: this.buildESP32Sequence(commands)
-    };
-  }
-
-  buildESP32Sequence(commands) {
-    const sequence = [];
-
-    for (const cmd of commands) {
-      const mapping = this.COMMAND_MAP[cmd.command];
-      for (let i = 0; i < cmd.repetitions; i++) {
-        sequence.push({
-          char: mapping.esp32,
-          command: cmd.command,
-          name: mapping.name,
-          step: i + 1
-        });
-      }
-    }
-
-    return sequence;
-  }
-
-  async executeProgram() {
-    const input = this.commandInput.value;
-    const parsed = this.parseAndValidate(input);
-
-    if (!parsed.valid) {
-      parsed.errors.forEach(err => this.addLog(err, 'invalid'));
+    if (pasos.length === 0) {
+      this.addLog('No se generó ningún paso válido', 'invalid');
       return;
     }
 
-    this.addLog(`Programa: ${parsed.raw}`, 'info');
-    this.addLog(`Secuencia ESP32: [${parsed.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
-
-    if (parsed.commands.some(c => c.command === 'P') && !this.videoActive) {
-      this.startVideo();
-    }
-    if (parsed.commands.some(c => c.command === 'F') && this.videoActive) {
-      this.stopVideo();
-    }
-
-    if (!this.wsManager || !this.wsManager.isConnected) {
-      this.addLog('No hay conexión con el servidor. Envío simulado.', 'warn');
-      parsed.esp32Sequence.forEach((step, i) => {
-        this.addLog(`Paso ${i + 1}: '${step.char}' → ${step.name}`, 'info');
+    try {
+      const res = await fetch(`${this.backendUrl}/api/programa-numeros`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pasos })
       });
-      return;
-    }
 
-    for (let i = 0; i < parsed.esp32Sequence.length; i++) {
-      const step = parsed.esp32Sequence[i];
-      try {
-        this.addLog(`Enviando paso ${i + 1}/${parsed.esp32Sequence.length}: '${step.char}' (${step.name})`, 'info');
-        const result = await this.wsManager.sendWithRetry({
-          type: 'COMMAND',
-          command: step.char,
-          commandName: step.name,
-          step: i + 1,
-          total: parsed.esp32Sequence.length
-        }, 3);
-        this.addLog(`OK - Paso ${result.attempt}/3 intentos`, 'valid');
-      } catch (err) {
-        this.addLog(`FALLO paso ${i + 1}: ${err.message}`, 'invalid');
+      const data = await res.json();
+
+      if (res.status === 400) {
+        (data.errors || []).forEach(err => this.addLog(err, 'invalid'));
+        return;
       }
-    }
 
-    this.addLog('Programa completado', 'valid');
+      if (res.status === 409) {
+        this.addLog(data.error, 'invalid');
+        return;
+      }
+
+      if (!res.ok) {
+        this.addLog(data.error || 'Error del servidor', 'invalid');
+        return;
+      }
+
+      this.activeSequenceId = data.sequenceId;
+      this.addLog(`Enviado al Receptor: ${data.decoded.length} comandos encriptados, ${data.totalSteps} pasos`, 'info');
+      this.addLog(`Secuencia ESP32: [${data.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
+      this.addLog('Esperando confirmaciones OK_*...', 'info');
+
+      if (data.decoded.some(c => c.command === 'P') && !this.videoActive) {
+        this.startVideo();
+      }
+      if (data.decoded.some(c => c.command === 'F') && this.videoActive) {
+        this.stopVideo();
+      }
+    } catch (err) {
+      this.addLog(`No se pudo contactar al backend (${this.backendUrl}): ${err.message}`, 'invalid');
+    }
   }
 
-  handleServerMessage(data) {
-    if (data.type === 'CONFIRMACION_COMANDO') {
-      this.addLog(`Confirmación recibida: ${data.message}`, 'valid');
-    } else if (data.type === 'AUDIT_LOG') {
-      const logMessage = data.details || `Número: ${data.number} → ${data.classification}`;
-      window.app.receiverView.addAuditLog(logMessage, data.classification?.toLowerCase());
-    }
-  }
-
-  startVideo() {
+  async startVideo() {
     this.videoPlaceholder.classList.add('hidden');
     this.videoOverlay.classList.remove('hidden');
     this.videoActive = true;
     this.addLog('Cámara encendida (P)', 'valid');
+
+    try {
+      const res = await fetch(`${this.backendUrl}/api/health`);
+      const health = await res.json();
+
+      if (health.carAddress) {
+        this.videoPlayer.src = `http://${health.carAddress}/mjpeg`;
+        this.addLog(`Stream MJPEG: http://${health.carAddress}/mjpeg`, 'info');
+      } else {
+        this.videoPlayer.removeAttribute('src');
+        this.addLog('Carro no conectado. Hardware real usa RTSP: rtsp://<ip_carro>:8554/stream', 'warn');
+      }
+    } catch {
+      this.videoPlayer.removeAttribute('src');
+    }
   }
 
   stopVideo() {
     this.videoPlaceholder.classList.remove('hidden');
     this.videoOverlay.classList.add('hidden');
     this.videoActive = false;
+    if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
     this.addLog('Cámara apagada (F)', 'warn');
   }
 
@@ -256,8 +259,8 @@ class TransmitterView {
   }
 
   destroy() {
-    if (this.wsManager) {
-      this.wsManager.disconnect();
+    if (this.eventSource) {
+      this.eventSource.close();
     }
   }
 }

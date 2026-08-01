@@ -9,21 +9,13 @@ workflow:
 
 stages:
   - lint
-  - build
   - test
 
 lint:
   stage: lint
   script:
-    - echo "Verificando HTML..."
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-
-build:
-  stage: build
-  script:
-    - echo "Compilando proyecto..."
+    - node --check Frontend/server.js
+    - node -e "import('./Backend/src/core/parser.js'); import('./Backend/src/core/automatas.js'); import('./Backend/src/core/encriptador.js'); import('./Backend/src/services/carService.js'); import('./Backend/src/services/auditService.js'); import('./Backend/src/services/transmisorService.js')"
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -31,7 +23,8 @@ build:
 test:
   stage: test
   script:
-    - echo "Ejecutando pruebas..."
+    - npm install --prefix Backend
+    - npm test --prefix Backend
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

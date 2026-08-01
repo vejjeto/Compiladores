@@ -1,6 +1,8 @@
 class ReceiverView {
-  constructor() {
-    this.wsManager = null;
+  constructor(backendUrl) {
+    this.backendUrl = backendUrl;
+    this.eventSource = null;
+
     this.espIpInput = document.getElementById('rx-esp-ip');
     this.espPortInput = document.getElementById('rx-esp-port');
     this.connectBtn = document.getElementById('rx-connect-btn');
@@ -10,94 +12,168 @@ class ReceiverView {
     this.auditBreakdown = document.getElementById('rx-audit-breakdown');
     this.dictamen = document.getElementById('rx-dictamen');
     this.clearLogsBtn = document.getElementById('rx-clear-logs-btn');
+    this.verifyInput = document.getElementById('rx-verify-input');
+    this.verifyBtn = document.getElementById('rx-verify-btn');
 
     this.PRIMES = [41, 43, 47, 53, 59, 61];
 
-    this.NUMBER_TABLE = {
-      A: { numbers: [1025, 1032, 1034, 1060, 1062, 1037], name: 'Avanzar' },
-      R: { numbers: [1066, 1075, 1081, 1007, 1003, 1098], name: 'Retroceder' },
-      D: { numbers: [1107, 1118, 1128, 1113, 1121, 1159], name: 'Girar Derecha' },
-      I: { numbers: [1148, 1161, 1175, 1166, 1180, 1220], name: 'Girar Izquierda' },
-      O: { numbers: [1189, 1204, 1222, 1219, 1239, 1281], name: 'Abrir Pinza' },
-      F: { numbers: [1230, 1247, 1269, 1272, 1298, 1342], name: 'Apagar Cámara' },
-      P: { numbers: [1271, 1290, 1316, 1325, 1357, 1403], name: 'Encender Cámara' },
-      C: { numbers: [1312, 1333, 1363, 1378, 1416, 1464], name: 'Cerrar Pinza' }
-    };
-
-    this.ESP_COMMAND_MAP = {
-      W: 'A', B: 'R', R: 'D', L: 'I',
-      O: 'O', C: 'C', P: 'P', F: 'F'
-    };
-
     this.bindEvents();
+    this.connectBackend();
+    this.loadAuditHistory();
+  }
+
+  updateBackendUrl(url) {
+    this.backendUrl = url;
+    this.connectBackend();
+    this.loadAuditHistory();
   }
 
   bindEvents() {
-    this.connectBtn.addEventListener('click', () => this.connectToESP32());
-    this.disconnectBtn.addEventListener('click', () => this.disconnectFromESP32());
+    this.connectBtn.addEventListener('click', () => this.connectToCar());
+    this.disconnectBtn.addEventListener('click', () => this.disconnectFromCar());
     this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
+
+    if (this.verifyBtn) {
+      this.verifyBtn.addEventListener('click', () => this.verifyNumber());
+    }
   }
 
-  divisibilityAutomaton(number, prime) {
-    const digits = number.toString().split('').map(Number);
-    let state = 0;
-    const a = 10 % prime;
-
-    for (const digit of digits) {
-      state = (a * state + digit) % prime;
+  connectBackend() {
+    if (this.eventSource) {
+      this.eventSource.close();
     }
 
-    return state === 0;
+    this.eventSource = new EventSource(`${this.backendUrl}/api/events`);
+
+    this.eventSource.addEventListener('AUDIT_LOG', (e) => {
+      this.renderAudit(JSON.parse(e.data));
+    });
+
+    this.eventSource.addEventListener('CAR_STATUS', (e) => {
+      this.handleCarStatus(JSON.parse(e.data));
+    });
+
+    this.eventSource.addEventListener('CAR_MESSAGE', (e) => {
+      const data = JSON.parse(e.data);
+      this.addAuditLog(`Carro: ${data.message}`, 'info');
+    });
   }
 
-  classifyNumber(number) {
-    const results = {};
-    let divisibleCount = 0;
+  async loadAuditHistory() {
+    try {
+      const res = await fetch(`${this.backendUrl}/api/audit`);
+      const data = await res.json();
+      (data.logs || []).forEach(log => this.renderAudit(log));
+    } catch {
+      this.addAuditLog(`No se pudo contactar al backend (${this.backendUrl})`, 'invalid');
+    }
+  }
 
-    for (const prime of this.PRIMES) {
-      const isDivisible = this.divisibilityAutomaton(number, prime);
-      results[prime] = isDivisible;
-      if (isDivisible) {
-        divisibleCount++;
-      }
+  renderAudit(log) {
+    if (log.results) {
+      this.updateAuditBreakdown(log.results);
+    }
+    if (log.classification) {
+      this.updateDictamen(log.classification);
     }
 
-    let classifiedAs;
-    let command = null;
-    let details = '';
+    const parts = [];
+    if (log.commandName) parts.push(`${log.commandName} (${log.command})`);
+    if (log.esp32Char) parts.push(`→ '${log.esp32Char}'`);
+    if (log.number != null) parts.push(`N°${log.number}`);
+    if (log.classification) parts.push(log.classification);
+    if (log.details) parts.push(log.details);
+    if (log.step != null) parts.push(`paso ${log.step}/${log.total}`);
 
-    const inTable = Object.values(this.NUMBER_TABLE).some(d => d.numbers.includes(number));
+    const message = parts.join(' | ') || 'Evento de auditoría';
+    this.addAuditLog(message, this.logType(log.classification));
+  }
 
-    if (!inTable) {
-      classifiedAs = 'FALSO';
-      details = `Número ${number} no pertenece a la tabla autorizada`;
-    } else if (divisibleCount === 1) {
-      classifiedAs = 'VALIDO';
-      for (const [cmd, data] of Object.entries(this.NUMBER_TABLE)) {
-        if (data.numbers.includes(number)) {
-          command = cmd;
-          const divisiblePrime = this.PRIMES.find(p => results[p]);
-          details = `Divisible por ${divisiblePrime} → ${data.name}`;
-          break;
-        }
-      }
-    } else if (divisibleCount === 0) {
-      classifiedAs = 'FALSO';
-      details = `Número ${number} en tabla pero no divisible por ningún primo`;
-    } else {
-      classifiedAs = 'CORRUPTO';
-      const divisors = this.PRIMES.filter(p => results[p]);
-      details = `Divisible por ${divisibleCount} primos: [${divisors.join(', ')}]`;
+  logType(classification) {
+    switch (classification) {
+      case 'VALIDO': return 'valid';
+      case 'FALSO': return 'invalid';
+      case 'CORRUPTO': return 'corrupt';
+      case 'DIRECTO': return 'command';
+      default: return 'info';
+    }
+  }
+
+  handleCarStatus(data) {
+    this.updateESPStatus(data.status);
+    if (data.status === 'connected') {
+      this.addAuditLog(`Carro conectado (${data.ip}:${data.port})`, 'valid');
+    } else if (data.status === 'disconnected') {
+      this.addAuditLog('Carro desconectado', 'invalid');
+    } else if (data.status === 'error') {
+      this.addAuditLog('Error de conexión con el carro', 'invalid');
+    }
+  }
+
+  async connectToCar() {
+    const ip = this.espIpInput.value.trim();
+    const port = parseInt(this.espPortInput.value, 10) || 80;
+
+    if (!ip) {
+      this.addAuditLog('Error: Ingrese la dirección IP del carro', 'invalid');
+      return;
     }
 
-    return {
-      number,
-      results,
-      classifiedAs,
-      command,
-      details,
-      divisibleCount
-    };
+    try {
+      this.addAuditLog(`Solicitando conexión al carro ${ip}:${port}...`, 'info');
+      const res = await fetch(`${this.backendUrl}/api/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, port })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        this.addAuditLog(`Error: ${data.error}`, 'invalid');
+        return;
+      }
+    } catch (err) {
+      this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
+    }
+  }
+
+  async disconnectFromCar() {
+    try {
+      await fetch(`${this.backendUrl}/api/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+    } catch (err) {
+      this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
+    }
+  }
+
+  async verifyNumber() {
+    const value = this.verifyInput.value.trim();
+
+    if (!value || isNaN(Number(value))) {
+      this.addAuditLog('Ingrese un número válido para verificar', 'invalid');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${this.backendUrl}/api/classify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: Number(value) })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        this.addAuditLog(`Error: ${data.error}`, 'invalid');
+        return;
+      }
+
+      this.verifyInput.value = '';
+    } catch (err) {
+      this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
+    }
   }
 
   updateAuditBreakdown(results) {
@@ -131,92 +207,6 @@ class ReceiverView {
     }
   }
 
-  processEncryptedNumber(number) {
-    this.addAuditLog(`Número recibido: ${number}`, 'info');
-
-    const classification = this.classifyNumber(number);
-
-    this.addAuditLog(`Desglose del autómata:`, 'info');
-    for (const [prime, divisible] of Object.entries(classification.results)) {
-      const status = divisible ? '✓ DIVISIBLE' : '✗ No divisible';
-      this.addAuditLog(`  % ${prime}: ${status}`, divisible ? 'valid' : 'info');
-    }
-
-    this.updateAuditBreakdown(classification.results);
-    this.updateDictamen(classification.classifiedAs);
-
-    if (classification.classifiedAs === 'VALIDO') {
-      const cmdData = this.NUMBER_TABLE[classification.command];
-      this.addAuditLog(`Dictamen: VÁLIDO → ${cmdData.name} (${classification.command})`, 'valid');
-      this.addAuditLog(`Comando desencriptado: ${classification.command}`, 'command');
-
-      const espChar = this.mapToESP32(classification.command);
-      this.addAuditLog(`Carácter ESP32: '${espChar}'`, 'command');
-
-      return classification;
-    } else if (classification.classifiedAs === 'FALSO') {
-      this.addAuditLog(`Dictamen: FALSO - ${classification.details}`, 'invalid');
-    } else {
-      this.addAuditLog(`Dictamen: CORRUPTO - ${classification.details}`, 'corrupt');
-    }
-
-    return classification;
-  }
-
-  mapToESP32(command) {
-    const map = {
-      A: 'W', R: 'B', D: 'R', I: 'L',
-      O: 'O', C: 'C', P: 'P', F: 'F'
-    };
-    return map[command] || '?';
-  }
-
-  connectToESP32() {
-    const ip = this.espIpInput.value.trim();
-    const port = this.espPortInput.value.trim();
-
-    if (!ip) {
-      this.addAuditLog('Error: Ingrese la dirección IP de la ESP32', 'invalid');
-      return;
-    }
-
-    const wsUrl = `ws://${ip}:${port}/ws`;
-    this.addAuditLog(`Conectando a ESP32 en ${wsUrl}...`, 'info');
-
-    this.wsManager = new WSManager(wsUrl, {
-      onConnect: () => {
-        this.updateESPStatus('connected');
-        this.addAuditLog('Conexión establecida con ESP32', 'valid');
-      },
-      onDisconnect: () => {
-        this.updateESPStatus('disconnected');
-        this.addAuditLog('Conexión con ESP32 perdida', 'invalid');
-      },
-      onMessage: (data) => this.handleESPMessage(data),
-      onReconnecting: (attempt) => {
-        this.updateESPStatus('connecting');
-        this.addAuditLog(`Reintentando conexión... (${attempt})`, 'warn');
-      }
-    });
-
-    this.wsManager.connect();
-  }
-
-  disconnectFromESP32() {
-    if (this.wsManager) {
-      this.wsManager.disconnect();
-      this.wsManager = null;
-      this.updateESPStatus('disconnected');
-      this.addAuditLog('Desconectado de ESP32', 'warn');
-    }
-  }
-
-  handleESPMessage(data) {
-    if (data.type === 'ESP_RESPONSE') {
-      this.addAuditLog(`ESP32 respondió: ${data.message}`, 'info');
-    }
-  }
-
   updateESPStatus(state) {
     const dot = this.statusEl.querySelector('.status-dot');
     const label = this.statusEl.querySelector('span:last-child');
@@ -225,15 +215,15 @@ class ReceiverView {
     switch (state) {
       case 'connected':
         dot.classList.add('status-connected');
-        label.textContent = 'ESP32 Conectada';
+        label.textContent = 'Carro Conectado';
         break;
       case 'disconnected':
         dot.classList.add('status-disconnected');
-        label.textContent = 'ESP32 Desconectada';
+        label.textContent = 'Carro Desconectado';
         break;
-      case 'connecting':
-        dot.classList.add('status-connecting');
-        label.textContent = 'Conectando...';
+      case 'error':
+        dot.classList.add('status-disconnected');
+        label.textContent = 'Error de conexión';
         break;
     }
   }
@@ -266,8 +256,8 @@ class ReceiverView {
   }
 
   destroy() {
-    if (this.wsManager) {
-      this.wsManager.disconnect();
+    if (this.eventSource) {
+      this.eventSource.close();
     }
   }
 }
