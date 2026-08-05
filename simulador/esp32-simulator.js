@@ -24,6 +24,11 @@ function procesarComando(client, char) {
     controlClient = null;
     client.send('Control liberado');
     console.log(`[CMD] 'M' → Control liberado`);
+    setTimeout(() => {
+      const response = `ACK:${char}`;
+      console.log(`[RSP] ${response}`);
+      client.send(response);
+    }, 150);
     return;
   }
 
@@ -41,7 +46,7 @@ function procesarComando(client, char) {
   console.log(`[CMD] Recibido: '${char}' → ${action}`);
 
   setTimeout(() => {
-    const response = `${action} ejecutado`;
+    const response = `ACK:${char}`;
     console.log(`[RSP] ${response}`);
     if (controlClient === client) client.send(response);
   }, 150);

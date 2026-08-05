@@ -1,15 +1,19 @@
 import { v4 as uuidv4 } from 'uuid';
-import { info } from '../utils/logger.js';
+import { info, warn, error } from '../utils/logger.js';
 import { parseCommands, getCommandInfo, validateCommands, buildESP32Sequence, COMMAND_MAP } from '../core/parser.js';
 import { classifyNumber, selectRandomNumber, NUMBER_TABLE } from '../core/encriptador.js';
 
 const COMPONENT = 'TRANSMISOR';
+const MAX_RETRIES = 3;
+const ACK_TIMEOUT = 5000;
 
 export class TransmisorService {
-  constructor({ carService, auditService, stepDelay = 350 }) {
+  constructor({ carService, auditService, stepDelay = 350, ackTimeout = ACK_TIMEOUT, maxRetries = MAX_RETRIES }) {
     this.carService = carService;
     this.auditService = auditService;
     this.stepDelay = stepDelay;
+    this.ackTimeout = ackTimeout;
+    this.maxRetries = maxRetries;
   }
 
   executeProgram(program) {
@@ -236,10 +240,18 @@ export class TransmisorService {
       timestamp: new Date().toISOString()
     });
 
-    this.runSequence(sequenceId, sequence, 0, Date.now());
+    this.runSequence(sequenceId, sequence, 0, Date.now()).catch((err) => {
+      error(COMPONENT, `Secuencia [${sequenceId}] error inesperado: ${err.message}`);
+      this.auditService.broadcast('SEQUENCE_ERROR', {
+        sequenceId,
+        step: null,
+        message: err.message,
+        timestamp: new Date().toISOString()
+      });
+    });
   }
 
-  runSequence(sequenceId, sequence, index, startedAt) {
+  async runSequence(sequenceId, sequence, index, startedAt) {
     if (index >= sequence.length) {
       this.auditService.broadcast('SEQUENCE_COMPLETED', {
         sequenceId,
@@ -259,13 +271,36 @@ export class TransmisorService {
     const number = cmd.numero ?? selectRandomNumber(cmd.command);
     const classification = number ? classifyNumber(number) : null;
 
-    try {
-      this.carService.sendCommand(cmd.char);
-    } catch (err) {
+    let acked = false;
+    let attempt = 0;
+
+    while (!acked && attempt < this.maxRetries) {
+      attempt += 1;
+      acked = await this.carService.waitForAck(cmd.char, this.ackTimeout);
+
+      if (!acked) {
+        warn(COMPONENT, `Secuencia [${sequenceId}] paso ${stepNumber}: sin ACK de '${cmd.char}' (intento ${attempt}/${this.maxRetries})`);
+        this.auditService.broadcast('STEP_RETRY', {
+          sequenceId,
+          step: stepNumber,
+          attempt,
+          total: this.maxRetries,
+          command: cmd.command,
+          commandName: cmd.name,
+          esp32Char: cmd.char,
+          message: `Reintentando '${cmd.name}' (intento ${attempt}/${this.maxRetries})`,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    if (!acked) {
+      const message = `El carro no confirmó el comando '${cmd.char}' (${cmd.name}) tras ${this.maxRetries} intentos`;
+      error(COMPONENT, `Secuencia [${sequenceId}] paso ${stepNumber}: ${message}`);
       this.auditService.broadcast('SEQUENCE_ERROR', {
         sequenceId,
         step: stepNumber,
-        message: err.message,
+        message,
         timestamp: new Date().toISOString()
       });
       return;
@@ -299,6 +334,7 @@ export class TransmisorService {
       timestamp: new Date().toISOString()
     });
 
-    setTimeout(() => this.runSequence(sequenceId, sequence, index + 1, startedAt), this.stepDelay);
+    await new Promise((r) => setTimeout(r, this.stepDelay));
+    return this.runSequence(sequenceId, sequence, index + 1, startedAt);
   }
 }

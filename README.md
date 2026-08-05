@@ -23,6 +23,7 @@ Este documento es el **manual completo** del proyecto: describe la arquitectura,
 - **Transmisor ↔ Backend: SOLO HTTP.** El Transmisor envía los números con `POST` (`fetch`) y recibe confirmaciones `OK_*` en tiempo real por **Server-Sent Events (SSE)**, que también es HTTP.
 - **Backend ↔ Carro: SOLO WebSocket.** El backend abre una conexión WebSocket con el carro y le envía **un byte crudo por comando** (el primer byte del mensaje es el comando, igual que el firmware real del ESP32).
 - **El frontend NO usa WebSocket en ningún momento.** Toda su comunicación es HTTP.
+- **Confirmación por paso (ACK):** el carro confirma cada comando con `ACK:<char>` por el WebSocket; el backend no avanza al siguiente paso hasta recibirla (reintenta hasta 3 veces con timeout de 5 s — ver `transmisorService`). Esto implementa la regla de espera/confirmación del protocolo.
 - **Video:** con el simulador el Transmisor muestra un stream **MJPEG** (`http://<ip_carro>:8081/mjpeg`); con el carro real la cámara se documenta como **RTSP** (`rtsp://<ip_carro>:8554/stream`), que el navegador no reproduce de forma nativa.
 
 ### ¿Por qué esta arquitectura?
@@ -138,6 +139,7 @@ Proyecto_Compiladores/
 - Conecta el backend al carro: `ws://<ip>:<puerto>/ws`.
 - `connect(ip, port)`: abre la conexión, con timeout de 5s y eventos de estado (`connected`, `disconnected`, `error`).
 - `sendCommand(char)`: envía **el char crudo** (texto) por el WebSocket; el carro lee el primer byte.
+- `waitForAck(char, timeout)`: envía el char y resuelve `true` cuando el carro responde `ACK:<char>` (o `false` al vencer el timeout). Si un ACK tardío llegara sin espera registrada se descarta.
 - Emite eventos `status` y `message` (mensajes de texto del carro, ej. "Control asignado a tu IP").
 
 #### `src/services/auditService.js` — Auditoría y eventos
@@ -158,11 +160,13 @@ Proyecto_Compiladores/
 - `sendRawChar(char)`: envía un char crudo directo al carro (compatibilidad/manual).
 - `classifyNumber(number)`: clasifica y agrega al log de auditoría (manual).
 - `runSequence(...)`: por cada paso:
-  1. Envía el char al carro por WebSocket.
-  2. Usa el número encriptado recibido (`cmd.numero`) o, si no existe (flujo por texto), elige uno aleatorio de la tabla.
-  3. Lo clasifica (debe ser `VALIDO`).
-  4. Agrega la entrada de auditoría y emite `STEP_SENT` con el mensaje `OK_<NOMBRE>:<paso>` (confirmación para el Transmisor).
-  5. Espera `stepDelay` (350 ms por defecto) entre pasos.
+  1. Envía el char al carro por WebSocket y **espera su confirmación** `ACK:<char>` (regla de espera del protocolo).
+  2. Si no llega ACK en **5 segundos**, **reintenta hasta 3 veces** (emite `STEP_RETRY` por intento).
+  3. Si se agotan los intentos, emite `SEQUENCE_ERROR` y detiene la secuencia.
+  4. Usa el número encriptado recibido (`cmd.numero`) o, si no existe (flujo por texto), elige uno aleatorio de la tabla.
+  5. Lo clasifica (debe ser `VALIDO`).
+  6. Agrega la entrada de auditoría y emite `STEP_SENT` con el mensaje `OK_<NOMBRE>:<paso>` (confirmación para el Transmisor).
+  7. Espera `stepDelay` (350 ms por defecto) entre pasos.
 
 #### `src/utils/logger.js` — Logger
 - Imprime con colores y niveles (`INFO`, `WARN`, `ERROR`, `SUCCESS`, `EVENT`) y timestamp.
@@ -200,7 +204,81 @@ Proyecto_Compiladores/
   - **WebSocket** `ws://0.0.0.0:8081/ws`: mismo protocolo que el firmware real (recibe **1 byte crudo** por mensaje; comandos `F B R L N P O C M`; control único).
   - **HTTP MJPEG** `http://0.0.0.0:8081/mjpeg`: stream multipart `multipart/x-mixed-replace` con un frame JPEG embebido (cámara simulada, ~5 fps).
 - Comandos: `F` Avanzar, `B` Retroceder, `R` Girar Derecha, `L` Girar Izquierda, `N` Cámara Encendida, `P` Cámara Apagada, `O` Abrir Pinza, `C` Cerrar Pinza, `M` Liberar Control.
+- **Confirmación:** tras ejecutar cada comando de acción responde `ACK:<char>`, que el backend usa para avanzar al siguiente paso.
 - Control único: la primera conexión recibe "Control asignado a tu IP"; las demás "ERROR: Control ocupado".
+
+---
+
+### 3.4 Recorrido paso a paso de todo el sistema
+
+Esta sección explica **el viaje completo de un programa**, desde que lo escribís en el Transmisor hasta que el carro lo ejecuta y la confirmación vuelve a tu pantalla. Se usa como ejemplo el programa `P, A:3, R:2, D, O, C, F` (encender cámara, avanzar 3, retroceder 2, girar derecha, abrir pinza, cerrar pinza, apagar cámara).
+
+### Fase A — Puesta en marcha (qué arranca con `npm start`)
+
+1. El script maestro `package.json` usa `concurrently` para lanzar **Backend** y **Frontend** juntos.
+2. **Backend** (`0.0.0.0:3000`) crea e instancia en orden:
+   - `CarService` → el cliente que hablará con el carro por WebSocket.
+   - `AuditService` → el log central + el hub de eventos SSE (`broadcast` / `subscribe`).
+   - `TransmisorService` (`{ carService, auditService, stepDelay: 350, ackTimeout: 5000, maxRetries: 3 }`).
+3. **Frontend** (`0.0.0.0:8080`) sirve la SPA (HTML/CSS/JS) y al abrirla crea dos vistas: `TransmisorView` y `ReceiverView`.
+
+### Fase B — El Transmisor (PC1) se prepara y encripta
+
+1. Al abrir el rol **Transmisor**, la vista hace `GET /api/tabla` y guarda los **54 números autorizados** en memoria. Recordá: la tabla vive solo en el backend; el Transmisor la descarga para encriptar, nunca la genera.
+2. `GET /api/events` (SSE) queda abierto como stream para recibir las confirmaciones en vivo.
+3. **Escribís el programa** en el textarea: `P, A:3, R:2, D, O, C, F`.
+4. Al presionar **Ejecutar Programa**, la vista **tokeniza** el texto (separa por comas y recorta espacios) y por cada comando:
+   - Elige un número **al azar** de la tabla para ese comando (eso es "encriptar": nada viaja como texto, solo números de 4 dígitos).
+   - Las acciones (`P, F, O, C, M`) fuerzan repetición `1`; los movimientos (`A, R, D, I`) usan la repetición que escribiste (entre 1 y 9).
+5. Arma el cuerpo JSON y lo envía por `fetch` (`POST`) al backend.
+
+### Fase C — El backend recibe y valida los números (Receptor "ciego")
+
+1. `server.js` recibe el `POST`, lee el cuerpo y llama `executeEncodedProgram(pasos)`. Acepta dos formatos: `{ pasos: [...] }` o el formato de la consigna `{ numero, repeticiones, timestamp }`.
+2. Por cada paso valida en orden:
+   1. **Integridad:** `numero` debe ser un entero de 4 dígitos (1000–9999). Si no, error `400`.
+   2. **Clasificación con el autómata** (`classifyNumber`): calcula la divisibilidad del número por cada uno de los 6 primos `[41, 43, 47, 53, 59, 61]` y emite el dictamen:
+      - `VALIDO` → divisible por exactamente 1 primo y está en la tabla.
+      - `FALSO` → está en la tabla o no coincide con ningún primo.
+      - `CORRUPTO` → divisible por 2 o más primos (posible ataque).
+   3. Si es inválido, rechaza con `400`, **audita** el rechazo y corta la secuencia; si es `VALIDO`, descompone el número → comando real (p. ej. `1025` → `A` = Avanzar).
+3. `validateCommands` aplica las reglas semánticas como en el flujo de texto: `P` primero, `F` último, acciones sin repetición.
+4. Si **no hay carro conectado** responde `409`. Si todo está bien, responde `202` (ejecución asíncrona) y arranca la secuencia.
+
+### Fase D — Ejecución paso a paso con confirmación (ACK)
+
+1. `startSequence` emite por SSE `SEQUENCE_STARTED` y llama `runSequence`.
+2. `runSequence` recorre la secuencia **de a un paso** (construida con `buildESP32Sequence`, que expande repeticiones: `A:2` → `F`, `F`).
+3. Por cada paso:
+   1. Determina el char del firmware: `A→F`, `R→B`, `D→R`, `I→L`, `P→N`, `F→P`, y `O→O`, `C→C`, `M→M`.
+   2. Llama `carService.waitForAck(char, 5000)`, que **envía el char por WebSocket** y espera a que el carro responda `ACK:<char>`.
+   3. **Regla de espera / reintento:** si el ACK no llega en 5 segundos, reintenta hasta **3 veces** (emite `STEP_RETRY` por intento). Si al final no confirma, emite `SEQUENCE_ERROR` y **detiene** la secuencia.
+   4. Cuando el ACK llega, registra la auditoría (`addLog`) y emite `STEP_SENT` con `OK_<NOMBRE>:<paso>` (la confirmación que ve el Transmisor).
+4. Al terminar todos los pasos, emite `SEQUENCE_COMPLETED` con la duración.
+
+### Fase E — El Carro (o Simulador): ejecuta y confirma
+
+1. El carro/simulador recibe el char por el WebSocket `ws://<ip>:8081/ws`.
+2. Ejecuta la acción (mover, girar, pinza, cámara) y responde:
+   - Para cada comando de acción → `ACK:<char>` (ej. `ACK:F`).
+   - Para `M` (Liberar Control) → `Control liberado` y luego `ACK:M`.
+   - Primera conexión: `Control asignado a tu IP`; conexiones extra: `ERROR: Control ocupado`.
+3. Esa confirmación vuelve por el mismo WebSocket al `CarService`, que resuelve el `waitForAck`.
+
+### Fase F — La confirmación y todo lo que vuelve al Transmisor
+
+1. **Por SSE** (`GET /api/events`, que es HTTP): el Transmisor recibe en vivo:
+   - `SEQUENCE_STARTED`, `STEP_SENT` (`OK_<NOMBRE>:<paso>`), `SEQUENCE_COMPLETED`, y errores (`STEP_RETRY`, `SEQUENCE_ERROR`).
+2. **En pantalla:** el log del Transmisor muestra el número encriptado enviado (`N°1025 ×3 → Avanzar`), la secuencia ESP32 decodificada y las confirmaciones `OK_*`.
+3. **Video:** si el programa incluye `P` (encender cámara) y el carro está conectado, el Transmisor apunta su `<img>` a `http://<ip>:8081/mjpeg` (simulador) y muestra el stream. Con `F` (apagar cámara) lo oculta. Con el carro real se documenta la URL RTSP.
+
+### 3.5 Caso PC1 – PC2 (dos computadoras)
+
+1. **PC1** ejecuta `npm start` (Backend en `0.0.0.0:3000` + Frontend en `0.0.0.0:8080`). Abre `http://localhost:8080` y asume el rol **Transmisor**.
+2. **PC2** abre `http://<IP_PC1>:8080` desde su navegador. En la barra superior configura el **Backend** como `http://<IP_PC1>:3000` (persiste en `localStorage`).
+3. En **PC2** el rol **Receptor**: conecta el carro o simulador (`POST /api/connect`).
+4. Ahora: PC1 encripta y ejecuta programas; el backend (que está en PC1) valida, habla con el carro por WebSocket, y ambos navegadores (PC1 y PC2) reciben los mismos eventos SSE y la misma auditoría.
+5. La arquitectura mantiene que **un solo proceso (el backend) cree el WebSocket con el carro**, así el control único del firmware no se disputa.
 
 ---
 
@@ -336,6 +414,7 @@ data: <JSON>
 |------|-------------|
 | `SEQUENCE_STARTED` | Una secuencia comenzó. `{ sequenceId, totalSteps }` |
 | `STEP_SENT` | Un paso fue enviado al carro (confirmación `OK_<NOMBRE>:<paso>`). Incluye `message`, `encryptedNumber`, `classification`, `ackId` |
+| `STEP_RETRY` | El carro no confirmó el ACK de un paso y se reintenta. `{ sequenceId, step, attempt, total }` |
 | `SEQUENCE_COMPLETED` | Secuencia terminada. `{ sequenceId, totalSteps, duration }` |
 | `SEQUENCE_ERROR` | Error durante la secuencia. `{ sequenceId, step, message }` |
 | `AUDIT_LOG` | Entrada de auditoría (para el Receptor). Incluye `results` y `classification` |
@@ -467,6 +546,7 @@ Los tests usan el runner nativo de Node (`node --test`) y cubren:
 | `test/encriptador.test.js` | Tabla de 54 números: unicidad, clasificación `VALIDO` y dictámenes |
 | `test/api-flujo-integral.test.js` | Flujo E2E por texto: API HTTP + conexión WebSocket a un carro mock |
 | `test/flujo-numeros.test.js` | Flujo E2E encriptado: `POST /api/programa-numeros`, `GET /api/tabla`, descomposición y `OK_*` |
+| `test/ack-reintento.test.js` | Confirmación ACK y regla de espera: formato `{numero, timestamp}`, reintento y `SEQUENCE_ERROR` cuando el carro no responde |
 
 **Ejecutar todos los tests:**
 ```bash
@@ -514,7 +594,9 @@ cd Backend && npm test
 - **Frontend Transmisor:** ahora encripta (elige números de la tabla) y muestra el video MJPEG del simulador; el video es un `<img>` en lugar de `<video>`.
 - **Tests:** nuevo `test/flujo-numeros.test.js` (10 casos E2E del flujo encriptado).
 - **Comentarios eliminados:** todo el código quedó sin comentarios; toda la documentación vive en este README.
-- Cambios anteriores (resumen): comunicación Transmisor↔Backend por **HTTP (REST + SSE)**; carro **solo WebSocket** con byte crudo; mapeo real del firmware (`A→F, R→B, D→R, I→L, P→N, F→P`); comando `M`; tabla de **54 números / 9 comandos**; `CORRUPTO` = divisible por 2+ primos.
+- **Cambios anteriores (resumen):** comunicación Transmisor↔Backend por **HTTP (REST + SSE)**; carro **solo WebSocket** con byte crudo; mapeo real del firmware (`A→F, R→B, D→R, I→L, P→N, F→P`); comando `M`; tabla de **54 números / 9 comandos**; `CORRUPTO` = divisible por 2+ primos.
+- **Confirmación ACK por paso (regla de espera):** el backend espera `ACK:<char>` del carro antes de avanzar; sin ACK en 5s reintenta hasta 3 veces (evento `STEP_RETRY`) y si se agotan emite `SEQUENCE_ERROR`. El simulador responde `ACK:<char>` por comando.
+- **Formato de la consigna:** `/api/programa-numeros` acepta también el cuerpo `{ numero, repeticiones, timestamp }` (además de `{ pasos: [...] }`), el `timestamp` se ignora a efectos de validación. Nuevo test `ack-reintento.test.js`.
 
 ---
 

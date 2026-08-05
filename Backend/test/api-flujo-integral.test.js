@@ -14,7 +14,10 @@ function startMockCar() {
       ws.send('Control asignado a tu IP');
       ws.on('message', (data) => {
         const msg = data.toString();
-        received.push(...msg.split(''));
+        for (const char of msg) {
+          received.push(char);
+          ws.send(`ACK:${char}`);
+        }
       });
     });
 

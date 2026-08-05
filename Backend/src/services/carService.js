@@ -4,6 +4,8 @@ import { info, warn, error, success } from '../utils/logger.js';
 
 const COMPONENT = 'CARRO';
 const CONNECT_TIMEOUT = 5000;
+const ACK_TIMEOUT = 5000;
+const pendingAcks = new Map();
 
 export class CarService extends EventEmitter {
   constructor() {
@@ -61,6 +63,16 @@ export class CarService extends EventEmitter {
         const message = data.toString();
         info(COMPONENT, `Mensaje del carro: ${message}`);
         this.emit('message', message);
+
+        if (message.startsWith('ACK:')) {
+          const key = message.slice(4);
+          const waiter = pendingAcks.get(key);
+          if (waiter) {
+            pendingAcks.delete(key);
+            clearTimeout(waiter.timer);
+            waiter.resolve(true);
+          }
+        }
       });
 
       ws.on('close', () => {
@@ -85,6 +97,9 @@ export class CarService extends EventEmitter {
   }
 
   disconnect() {
+    for (const key of [...pendingAcks.keys()]) {
+      pendingAcks.delete(key);
+    }
     if (this.ws) {
       const ws = this.ws;
       this.ws = null;
@@ -101,6 +116,43 @@ export class CarService extends EventEmitter {
       throw new Error('No hay conexión con el carro');
     }
     this.ws.send(char);
+  }
+
+  waitForAck(char, timeout = ACK_TIMEOUT) {
+    if (!this.connected) {
+      return Promise.resolve(false);
+    }
+
+    if (pendingAcks.has(char)) {
+      pendingAcks.delete(char);
+    }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (pendingAcks.has(char)) {
+          pendingAcks.delete(char);
+          warn(COMPONENT, `Timeout esperando ACK para '${char}' (${timeout}ms)`);
+          resolve(false);
+        }
+      }, timeout);
+
+      pendingAcks.set(char, {
+        timer,
+        resolve: (ok) => {
+          clearTimeout(timer);
+          resolve(ok);
+        }
+      });
+
+      try {
+        this.ws.send(char);
+      } catch (err) {
+        clearTimeout(timer);
+        if (pendingAcks.has(char)) pendingAcks.delete(char);
+        error(COMPONENT, `Error enviando '${char}' al carro`, { error: err.message });
+        resolve(false);
+      }
+    });
   }
 
   emitStatus(status) {

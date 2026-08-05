@@ -15,7 +15,13 @@ export function createApp(options = {}) {
 
   const carService = new CarService();
   const auditService = new AuditService();
-  const transmisorService = new TransmisorService({ carService, auditService, stepDelay });
+  const transmisorService = new TransmisorService({
+    carService,
+    auditService,
+    stepDelay,
+    ackTimeout: options.ackTimeout,
+    maxRetries: options.maxRetries
+  });
 
   carService.on('status', ({ status, ip, port }) => {
     auditService.broadcast('CAR_STATUS', {
@@ -168,7 +174,13 @@ async function handleRequest(req, res, ctx) {
       }
 
       if (path === '/api/programa-numeros') {
-        const result = ctx.transmisorService.executeEncodedProgram(body.pasos);
+        let pasos;
+        if (Array.isArray(body.pasos)) {
+          pasos = body.pasos;
+        } else if (Number.isInteger(Number(body.numero))) {
+          pasos = [{ numero: Number(body.numero), repeticiones: body.repeticiones ?? 1 }];
+        }
+        const result = ctx.transmisorService.executeEncodedProgram(pasos);
         return respond(res, result.status, result);
       }
 

@@ -200,8 +200,8 @@ class TransmitterView {
   }
 
   async startVideo() {
-    this.videoPlaceholder.classList.add('hidden');
-    this.videoOverlay.classList.remove('hidden');
+    if (this.videoPlaceholder) this.videoPlaceholder.classList.add('hidden');
+    if (this.videoOverlay) this.videoOverlay.classList.remove('hidden');
     this.videoActive = true;
     this.addLog('Cámara encendida (P)', 'valid');
 
@@ -209,15 +209,15 @@ class TransmitterView {
       const res = await fetch(`${this.backendUrl}/api/health`);
       const health = await res.json();
 
-      if (health.carAddress) {
+      if (health.carAddress && this.videoPlayer) {
         this.videoPlayer.src = `http://${health.carAddress}/mjpeg`;
         this.addLog(`Stream MJPEG: http://${health.carAddress}/mjpeg`, 'info');
       } else {
-        this.videoPlayer.removeAttribute('src');
+        if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
         this.addLog('Carro no conectado. Hardware real usa RTSP: rtsp://<ip_carro>:8554/stream', 'warn');
       }
     } catch {
-      this.videoPlayer.removeAttribute('src');
+      if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
     }
   }
 
