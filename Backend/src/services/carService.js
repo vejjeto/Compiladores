@@ -1,11 +1,10 @@
 import { EventEmitter } from 'events';
 import { WebSocket } from 'ws';
-import { info, warn, error, success } from '../utils/logger.js';
+import logger from '../utils/logger.js';
 
 const COMPONENT = 'CARRO';
 const CONNECT_TIMEOUT = 5000;
 const ACK_TIMEOUT = 5000;
-const pendingAcks = new Map();
 
 export class CarService extends EventEmitter {
   constructor() {
@@ -13,6 +12,7 @@ export class CarService extends EventEmitter {
     this.ws = null;
     this.ip = null;
     this.port = null;
+    this.pendingAcks = new Map();
   }
 
   get connected() {
@@ -33,7 +33,7 @@ export class CarService extends EventEmitter {
     this.disconnect();
 
     return new Promise((resolve, reject) => {
-      info(COMPONENT, `Conectando al carro en ${url}`);
+      logger.info(COMPONENT, `Conectando al carro en ${url}`);
 
       const ws = new WebSocket(url);
       let settled = false;
@@ -54,21 +54,21 @@ export class CarService extends EventEmitter {
         this.ws = ws;
         this.ip = ip;
         this.port = Number(port);
-        success(COMPONENT, `Carro conectado en ${url}`);
+        logger.success(COMPONENT, `Carro conectado en ${url}`);
         this.emitStatus('connected');
         resolve({ ok: true, status: 'connected', ip, port });
       });
 
       ws.on('message', (data) => {
         const message = data.toString();
-        info(COMPONENT, `Mensaje del carro: ${message}`);
+        logger.info(COMPONENT, `Mensaje del carro: ${message}`);
         this.emit('message', message);
 
         if (message.startsWith('ACK:')) {
           const key = message.slice(4);
-          const waiter = pendingAcks.get(key);
+          const waiter = this.pendingAcks.get(key);
           if (waiter) {
-            pendingAcks.delete(key);
+            this.pendingAcks.delete(key);
             clearTimeout(waiter.timer);
             waiter.resolve(true);
           }
@@ -79,14 +79,14 @@ export class CarService extends EventEmitter {
         clearTimeout(timeout);
         if (this.ws === ws) {
           this.ws = null;
-          warn(COMPONENT, 'Carro desconectado');
+          logger.warn(COMPONENT, 'Carro desconectado');
           this.emitStatus('disconnected');
         }
       });
 
       ws.on('error', (err) => {
         clearTimeout(timeout);
-        error(COMPONENT, 'Error con el carro', { error: err.message });
+        logger.error(COMPONENT, 'Error con el carro', { error: err.message });
         if (!settled) {
           settled = true;
           this.emitStatus('error');
@@ -97,14 +97,16 @@ export class CarService extends EventEmitter {
   }
 
   disconnect() {
-    for (const key of [...pendingAcks.keys()]) {
-      pendingAcks.delete(key);
+    for (const [key, waiter] of [...this.pendingAcks.entries()]) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(false);
+      this.pendingAcks.delete(key);
     }
     if (this.ws) {
       const ws = this.ws;
       this.ws = null;
       try { ws.close(); } catch { }
-      warn(COMPONENT, 'Desconectando carro');
+      logger.warn(COMPONENT, 'Desconectando carro');
       this.emitStatus('disconnected');
     }
     this.ip = null;
@@ -123,20 +125,20 @@ export class CarService extends EventEmitter {
       return Promise.resolve(false);
     }
 
-    if (pendingAcks.has(char)) {
-      pendingAcks.delete(char);
+    if (this.pendingAcks.has(char)) {
+      this.pendingAcks.delete(char);
     }
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        if (pendingAcks.has(char)) {
-          pendingAcks.delete(char);
-          warn(COMPONENT, `Timeout esperando ACK para '${char}' (${timeout}ms)`);
+        if (this.pendingAcks.has(char)) {
+          this.pendingAcks.delete(char);
+          logger.warn(COMPONENT, `Timeout esperando ACK para '${char}' (${timeout}ms)`);
           resolve(false);
         }
       }, timeout);
 
-      pendingAcks.set(char, {
+      this.pendingAcks.set(char, {
         timer,
         resolve: (ok) => {
           clearTimeout(timer);
@@ -148,8 +150,8 @@ export class CarService extends EventEmitter {
         this.ws.send(char);
       } catch (err) {
         clearTimeout(timer);
-        if (pendingAcks.has(char)) pendingAcks.delete(char);
-        error(COMPONENT, `Error enviando '${char}' al carro`, { error: err.message });
+        if (this.pendingAcks.has(char)) this.pendingAcks.delete(char);
+        logger.error(COMPONENT, `Error enviando '${char}' al carro`, { error: err.message });
         resolve(false);
       }
     });

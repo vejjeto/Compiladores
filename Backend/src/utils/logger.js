@@ -49,28 +49,38 @@ export function log(component, level, message, data) {
   console.log(formatted);
 }
 
-export function info(component, message, data) {
-  log(component, 'INFO', message, data);
+export default class logger {
+  /**
+   * Logs an info message.
+   */
+  static info(component, message, data) {
+    log(component, 'INFO', message, data);
+  }
+
+  static warn(component, message, data) {
+    log(component, 'WARN', message, data);
+  }
+
+  static error(component, message, data) {
+    log(component, 'ERROR', message, data);
+  }
+
+  static debug(component, message, data) {
+    log(component, 'DEBUG', message, data);
+  }
+
+  static success(component, message, data) {
+    log(component, 'SUCCESS', message, data);
+  }
+
+  static event(component, message, data) {
+    log(component, 'EVENT', message, data);
+  }
 }
 
-export function warn(component, message, data) {
-  log(component, 'WARN', message, data);
-}
-
-export function error(component, message, data) {
-  log(component, 'ERROR', message, data);
-}
-
-export function debug(component, message, data) {
-  log(component, 'DEBUG', message, data);
-}
-
-export function success(component, message, data) {
-  log(component, 'SUCCESS', message, data);
-}
-
-export function event(component, message, data) {
-  log(component, 'EVENT', message, data);
-}
-
-export default { log, info, warn, error, debug, success, event };
+export const info = (component, message, data) => logger.info(component, message, data);
+export const warn = (component, message, data) => logger.warn(component, message, data);
+export const error = (component, message, data) => logger.error(component, message, data);
+export const debug = (component, message, data) => logger.debug(component, message, data);
+export const success = (component, message, data) => logger.success(component, message, data);
+export const event = (component, message, data) => logger.event(component, message, data);

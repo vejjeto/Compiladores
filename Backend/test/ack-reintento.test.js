@@ -3,6 +3,11 @@ import assert from 'node:assert';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createApp } from '../server.js';
+import { codificarPrograma } from '../src/core/encriptador.js';
+
+function programaDe(comando, repeticiones = 1) {
+  return codificarPrograma([{ command: comando, repetitions: repeticiones }]).numeroUnico;
+}
 
 function startMockCar({ ack = true } = {}) {
   return new Promise((resolve) => {
@@ -83,7 +88,7 @@ describe('Confirmación ACK y reintento (regla de espera del documento)', () => 
     await new Promise((resolve) => car.wss.close(() => car.server.close(() => resolve())));
   });
 
-  it('acepta el formato de la consigna { numero, repeticiones, timestamp }', async () => {
+  it('ejecuta un programa encriptado con repeticiones (F:2 → 2 pasos)', async () => {
     const res = await fetch(`http://127.0.0.1:${appPort}/api/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -94,7 +99,7 @@ describe('Confirmación ACK y reintento (regla de espera del documento)', () => 
     const run = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ numero: 1025, repeticiones: 2, timestamp: '2026-07-22 10:30:00' })
+      body: JSON.stringify({ programa: programaDe('F', 2) })
     });
     const data = await run.json();
     assert.strictEqual(run.status, 202);
@@ -111,7 +116,7 @@ describe('Confirmación ACK y reintento (regla de espera del documento)', () => 
     const res = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ numero: 1271, repeticiones: 1 })
+      body: JSON.stringify({ programa: programaDe('N') })
     });
     const data = await res.json();
     assert.strictEqual(res.status, 202);
@@ -141,7 +146,7 @@ describe('Confirmación ACK y reintento (regla de espera del documento)', () => 
       const res = await fetch(`http://127.0.0.1:${app2Port}/api/programa-numeros`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ numero: 1025, repeticiones: 1 })
+        body: JSON.stringify({ programa: programaDe('F') })
       });
       const data = await res.json();
       assert.strictEqual(res.status, 202);

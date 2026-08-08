@@ -1,64 +1,87 @@
 import { getClassificationResults, countDivisibilities, PRIMES } from './automatas.js';
+import logger from '../utils/logger.js';
 
-export const NUMBER_TABLE = {
-  A: { numbers: [1025, 1032, 1034, 1060, 1062, 1037], name: 'Avanzar' },
-  R: { numbers: [1066, 1075, 1081, 1007, 1003, 1098], name: 'Retroceder' },
-  D: { numbers: [1107, 1118, 1128, 1113, 1121, 1159], name: 'Girar Derecha' },
-  I: { numbers: [1148, 1161, 1175, 1166, 1180, 1220], name: 'Girar Izquierda' },
-  O: { numbers: [1189, 1204, 1222, 1219, 1239, 1281], name: 'Abrir Pinza' },
-  F: { numbers: [1230, 1247, 1269, 1272, 1298, 1342], name: 'Apagar Cámara' },
-  P: { numbers: [1271, 1290, 1316, 1325, 1357, 1403], name: 'Encender Cámara' },
-  C: { numbers: [1312, 1333, 1363, 1378, 1416, 1464], name: 'Cerrar Pinza' },
-  M: { numbers: [1353, 1376, 1410, 1431, 1475, 1525], name: 'Liberar Control' }
+export const COMMAND_RANGE = {
+  F: { min: 1000, max: 1999, name: 'Avanzar' },
+  B: { min: 2000, max: 2999, name: 'Retroceder' },
+  R: { min: 3000, max: 3999, name: 'Girar Derecha' },
+  L: { min: 4000, max: 4999, name: 'Girar Izquierda' },
+  O: { min: 5000, max: 5999, name: 'Abrir Pinza' },
+  C: { min: 6000, max: 6999, name: 'Cerrar Pinza' },
+  N: { min: 7000, max: 7999, name: 'Encender Cámara' },
+  P: { min: 8000, max: 8999, name: 'Apagar Cámara' },
+  M: { min: 9000, max: 9999, name: 'Liberar Control' }
 };
 
-export const ALL_NUMBERS = [];
-for (const [cmd, data] of Object.entries(NUMBER_TABLE)) {
-  for (const num of data.numbers) {
-    ALL_NUMBERS.push({ number: num, command: cmd, name: data.name });
-  }
+export function getRangeByCommand(command) {
+  return COMMAND_RANGE[command] || null;
 }
 
-export function selectRandomNumber(command) {
-  const data = NUMBER_TABLE[command];
-  if (!data) return null;
-  const idx = Math.floor(Math.random() * data.numbers.length);
-  return data.numbers[idx];
-}
-
-export function getCommandByNumber(number) {
-  for (const [cmd, data] of Object.entries(NUMBER_TABLE)) {
-    if (data.numbers.includes(number)) {
-      return { command: cmd, name: data.name };
+export function getCommandByRange(number) {
+  for (const [command, range] of Object.entries(COMMAND_RANGE)) {
+    if (number >= range.min && number <= range.max) {
+      return { command, ...range };
     }
   }
   return null;
 }
 
-export function classifyNumber(number) {
-  const inTable = getCommandByNumber(number);
+export function generarNumeroConIntentos(command) {
+  const range = getRangeByCommand(command);
+
+  if (!range) {
+    logger.debug('Encriptador', `Command '${command}' has no authorized range.`);
+    return { numero: null, intentos: [] };
+  }
+
+  const intentos = [];
+
+  for (let attempt = 0; attempt < 10000; attempt++) {
+    const candidate = range.min + Math.floor(Math.random() * (range.max - range.min + 1));
+    const divisibleCount = countDivisibilities(getClassificationResults(candidate));
+
+    if (divisibleCount === 1) {
+      logger.debug('Encriptador', `Number ${candidate} generated for command ${command}.`);
+      return { numero: candidate, intentos };
+    }
+
+    intentos.push(candidate);
+  }
+
+  return { numero: null, intentos };
+}
+
+export function generarNumero(command) {
+  return generarNumeroConIntentos(command).numero;
+}
+
+export function clasificarNumero(number) {
   const results = getClassificationResults(number);
   const divisibleCount = countDivisibilities(results);
+  const rangeEntry = getCommandByRange(number);
 
   let classifiedAs;
   let command = null;
+  let name = null;
   let details = '';
 
   if (divisibleCount >= 2) {
     classifiedAs = 'CORRUPTO';
-    const divisors = PRIMES.filter(p => results[p]);
+    const divisors = PRIMES.filter((p) => results[p]);
     details = `Divisible por ${divisibleCount} primos: [${divisors.join(', ')}]`;
-  } else if (inTable && divisibleCount === 1) {
+    logger.error('Encriptador', `Number ${number} classified as CORRUPTO. ${details}`);
+  } else if (rangeEntry && divisibleCount === 1) {
     classifiedAs = 'VALIDO';
-    command = inTable.command;
-    const divisiblePrime = PRIMES.find(p => results[p]);
-    details = `Divisible por ${divisiblePrime} → ${inTable.name}`;
-  } else if (!inTable) {
+    command = rangeEntry.command;
+    name = rangeEntry.name;
+    const divisiblePrime = PRIMES.find((p) => results[p]);
+    details = `Divisible por ${divisiblePrime} → ${name}`;
+  } else if (!rangeEntry) {
     classifiedAs = 'FALSO';
-    details = `Número ${number} no pertenece a la tabla autorizada`;
+    details = `Número ${number} no pertenece a ningún rango autorizado`;
   } else {
     classifiedAs = 'FALSO';
-    details = `Número ${number} en tabla pero no divisible por ningún primo`;
+    details = `Número ${number} en rango pero no divisible por ningún primo`;
   }
 
   return {
@@ -66,8 +89,92 @@ export function classifyNumber(number) {
     results,
     classifiedAs,
     command,
+    name,
     details,
     divisibleCount,
-    inTable: !!inTable
+    inRange: !!rangeEntry
   };
+}
+
+export const classifyNumber = clasificarNumero;
+
+export function codificarPrograma(comandos) {
+  const bloques = [];
+
+  for (const cmd of comandos) {
+    const repetitions = Math.max(1, cmd.repetitions || 1);
+
+    for (let i = 0; i < repetitions; i++) {
+      const { numero, intentos } = generarNumeroConIntentos(cmd.command);
+
+      if (numero == null) {
+        continue;
+      }
+
+      bloques.push({
+        numero,
+        command: cmd.command,
+        name: cmd.name || getRangeByCommand(cmd.command)?.name || null,
+        intentos
+      });
+    }
+  }
+
+  const numeroUnico = bloques.map((b) => String(b.numero)).join('');
+
+  return { numeroUnico, bloques };
+}
+
+export function decodificarPrograma(numeroStr) {
+  const errors = [];
+  const raw = typeof numeroStr === 'string' ? numeroStr.trim() : '';
+
+  if (!raw) {
+    return { valid: false, errors: ['El programa numérico está vacío'], decoded: [], bloques: [] };
+  }
+
+  if (raw.length % 4 !== 0) {
+    return {
+      valid: false,
+      errors: [`La longitud del programa numérico debe ser múltiplo de 4 (recibido ${raw.length} dígitos)`],
+      decoded: [],
+      bloques: []
+    };
+  }
+
+  const bloques = [];
+  const decoded = [];
+
+  for (let i = 0; i < raw.length; i += 4) {
+    const blockStr = raw.slice(i, i + 4);
+    const numero = Number(blockStr);
+    const blockIndex = i / 4 + 1;
+
+    if (!Number.isInteger(numero) || numero < 1000 || numero > 9999) {
+      errors.push(`Bloque ${blockIndex}: '${blockStr}' no es un número de 4 dígitos entre 1000 y 9999`);
+      bloques.push({ numero: blockStr, classification: 'INVALIDO', command: null, name: null });
+      continue;
+    }
+
+    const classification = clasificarNumero(numero);
+
+    if (classification.classifiedAs !== 'VALIDO') {
+      errors.push(`Bloque ${blockIndex}: N°${numero} rechazado (${classification.classifiedAs}): ${classification.details}`);
+      bloques.push({ numero, ...classification });
+      continue;
+    }
+
+    bloques.push({ numero, ...classification });
+    decoded.push({
+      command: classification.command,
+      repetitions: 1,
+      numero,
+      token: classification.command,
+      esp32Char: classification.command,
+      name: classification.name,
+      type: null
+    });
+  }
+
+  return { valid: errors.length === 0, errors, decoded, bloques };
 }

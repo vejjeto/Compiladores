@@ -1,17 +1,17 @@
 const COMMAND_MAP = {
-  A: { esp32: 'F', name: 'Avanzar', type: 'movement' },
-  R: { esp32: 'B', name: 'Retroceder', type: 'movement' },
-  D: { esp32: 'R', name: 'Girar Derecha', type: 'movement' },
-  I: { esp32: 'L', name: 'Girar Izquierda', type: 'movement' },
+  F: { esp32: 'F', name: 'Avanzar', type: 'movement' },
+  B: { esp32: 'B', name: 'Retroceder', type: 'movement' },
+  R: { esp32: 'R', name: 'Girar Derecha', type: 'movement' },
+  L: { esp32: 'L', name: 'Girar Izquierda', type: 'movement' },
   O: { esp32: 'O', name: 'Abrir Pinza', type: 'action' },
   C: { esp32: 'C', name: 'Cerrar Pinza', type: 'action' },
-  P: { esp32: 'N', name: 'Encender Cámara', type: 'camera' },
-  F: { esp32: 'P', name: 'Apagar Cámara', type: 'camera' },
+  N: { esp32: 'N', name: 'Encender Cámara', type: 'camera' },
+  P: { esp32: 'P', name: 'Apagar Cámara', type: 'camera' },
   M: { esp32: 'M', name: 'Liberar Control', type: 'action' }
 };
 
-const MOVEMENT_COMMANDS = ['A', 'R', 'D', 'I'];
-const ACTION_COMMANDS = ['P', 'F', 'O', 'C', 'M'];
+const MOVEMENT_COMMANDS = ['F', 'B', 'R', 'L'];
+const ACTION_COMMANDS = ['O', 'C', 'N', 'P', 'M'];
 const COMMAND_REGEX = /^([A-Z])(?::([1-9]))?$/;
 
 export function parseCommands(inputString) {
@@ -68,15 +68,15 @@ export function parseCommands(inputString) {
 export function validateCommands(commands) {
   const errors = [];
 
-  const pIndex = commands.findIndex(c => c.command === 'P');
-  const fIndex = commands.map(c => c.command).lastIndexOf('F');
+  const nIndex = commands.findIndex(c => c.command === 'N');
+  const pIndex = commands.map(c => c.command).lastIndexOf('P');
 
-  if (pIndex !== -1 && pIndex !== 0) {
-    errors.push(`Error semántico: 'P' debe ser el primer comando (posición actual: ${pIndex + 1})`);
+  if (nIndex !== -1 && nIndex !== 0) {
+    errors.push(`Error semántico: 'N' debe ser el primer comando (posición actual: ${nIndex + 1})`);
   }
 
-  if (fIndex !== -1 && fIndex !== commands.length - 1) {
-    errors.push(`Error semántico: 'F' debe ser el último comando (posición actual: ${fIndex + 1})`);
+  if (pIndex !== -1 && pIndex !== commands.length - 1) {
+    errors.push(`Error semántico: 'P' debe ser el último comando (posición actual: ${pIndex + 1})`);
   }
 
   for (let i = 0; i < commands.length; i++) {

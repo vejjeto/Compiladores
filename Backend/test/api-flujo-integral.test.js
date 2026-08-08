@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createApp } from '../server.js';
+import { codificarPrograma } from '../src/core/encriptador.js';
 
 function startMockCar() {
   return new Promise((resolve) => {
@@ -90,15 +91,22 @@ describe('API HTTP - flujo integral (Transmisor → Backend → Carro)', () => {
     assert.strictEqual(data.status, 'ok');
   });
 
-  it('POST /api/program sin carro conectado devuelve 409', async () => {
+  it('POST /api/program sin carro conectado acepta y emite SEQUENCE_ERROR', async () => {
+    const ssePromise = waitForSseEvent(appPort, 'SEQUENCE_ERROR');
+    await new Promise((r) => setTimeout(r, 30));
+
     const res = await fetch(`http://127.0.0.1:${appPort}/api/program`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ program: 'P, A:3' })
+      body: JSON.stringify({ program: 'N, F:3' })
     });
     const data = await res.json();
-    assert.strictEqual(res.status, 409);
-    assert.ok(data.error.includes('No hay conexión con el carro'));
+    assert.strictEqual(res.status, 202);
+    assert.ok(data.sequenceId);
+    assert.strictEqual(data.valid, true);
+
+    const sseBlock = await ssePromise;
+    assert.ok(sseBlock.includes('no confirmó'));
   });
 
   it('POST /api/connect conecta al carro vía WebSocket', async () => {
@@ -110,6 +118,49 @@ describe('API HTTP - flujo integral (Transmisor → Backend → Carro)', () => {
     const data = await res.json();
     assert.strictEqual(res.status, 200);
     assert.strictEqual(data.status, 'connected');
+  });
+
+  it('GET /api/rangos devuelve los rangos autorizados por comando', async () => {
+    const res = await fetch(`http://127.0.0.1:${appPort}/api/rangos`);
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(Object.keys(data.rangos).length, 9);
+    assert.strictEqual(data.rangos.F.name, 'Avanzar');
+    assert.strictEqual(data.rangos.M.max, 9999);
+  });
+
+  it('POST /api/codificar codifica un programa de comandos a número único', async () => {
+    const res = await fetch(`http://127.0.0.1:${appPort}/api/codificar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ program: 'F:2, R' })
+    });
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(data.valid, true);
+    assert.strictEqual(data.numeroUnico.length, 12);
+    assert.deepStrictEqual(data.bloques.map(b => b.command), ['F', 'F', 'R']);
+  });
+
+  it('POST /api/programa-numeros ejecuta un programa encriptado y el carro recibe la secuencia', async () => {
+    const numeroUnico = codificarPrograma([
+      { command: 'F', repetitions: 2 },
+      { command: 'R', repetitions: 1 }
+    ]).numeroUnico;
+
+    const res = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ programa: numeroUnico })
+    });
+    const data = await res.json();
+
+    assert.strictEqual(res.status, 202);
+    assert.ok(data.sequenceId);
+    assert.strictEqual(data.totalSteps, 3);
+    assert.strictEqual(data.esp32Sequence.map(s => s.char).join(''), 'FFR');
+
+    await waitFor(() => car.received.join('').endsWith('FFR'));
   });
 
   it('POST /api/classify clasifica un número y genera AUDIT_LOG', async () => {
@@ -130,10 +181,12 @@ describe('API HTTP - flujo integral (Transmisor → Backend → Carro)', () => {
   });
 
   it('POST /api/program ejecuta el programa y el carro recibe la secuencia exacta', async () => {
+    car.received.length = 0;
+
     const res = await fetch(`http://127.0.0.1:${appPort}/api/program`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ program: 'P, A:3, R:2, D, O, C, F' })
+      body: JSON.stringify({ program: 'N, F:3, B:2, R, O, C, P' })
     });
     const data = await res.json();
 
@@ -150,7 +203,7 @@ describe('API HTTP - flujo integral (Transmisor → Backend → Carro)', () => {
     const programLogs = logs.filter(l => l.sequenceId === data.sequenceId);
     assert.strictEqual(programLogs.length, 10);
     assert.ok(programLogs.every(l => l.classification === 'VALIDO'));
-    assert.strictEqual(programLogs[0].command, 'P');
+    assert.strictEqual(programLogs[0].command, 'N');
     assert.strictEqual(programLogs[0].esp32Char, 'N');
   });
 

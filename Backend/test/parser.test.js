@@ -17,37 +17,37 @@ describe('Parser - parseCommands', () => {
   });
 
   it('debe parsear comando simple válido', () => {
-    const result = parseCommands('A');
+    const result = parseCommands('F');
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.commands.length, 1);
-    assert.strictEqual(result.commands[0].command, 'A');
+    assert.strictEqual(result.commands[0].command, 'F');
     assert.strictEqual(result.commands[0].esp32Char, 'F');
     assert.strictEqual(result.commands[0].name, 'Avanzar');
   });
 
   it('debe parsear comando con repetición', () => {
-    const result = parseCommands('A:3');
+    const result = parseCommands('F:3');
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.commands[0].repetitions, 3);
     assert.strictEqual(result.esp32Sequence.length, 3);
   });
 
   it('debe parsear programa completo válido', () => {
-    const result = parseCommands('P, A:3, R:2, D, O, C, F');
+    const result = parseCommands('N, F:3, B:2, R, O, C, P');
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.commands.length, 7);
   });
 
   it('debe generar secuencia ESP32 correctamente', () => {
-    const result = parseCommands('A:2, D');
+    const result = parseCommands('F:2, R');
     assert.strictEqual(result.esp32Sequence.length, 3);
     assert.strictEqual(result.esp32Sequence[0].char, 'F');
     assert.strictEqual(result.esp32Sequence[1].char, 'F');
     assert.strictEqual(result.esp32Sequence[2].char, 'R');
   });
 
-  it('debe mapear cámara al protocolo real del carro (P→N, F→P)', () => {
-    const result = parseCommands('P, A, F');
+  it('debe mapear cámara al protocolo real del carro (N al inicio, P al final)', () => {
+    const result = parseCommands('N, F, P');
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.esp32Sequence[0].char, 'N');
     assert.strictEqual(result.esp32Sequence[1].char, 'F');
@@ -55,7 +55,7 @@ describe('Parser - parseCommands', () => {
   });
 
   it('debe mapear todos los comandos al protocolo real del carro', () => {
-    const result = parseCommands('A, R, D, I, O, C, M, P, F');
+    const result = parseCommands('F, B, R, L, O, C, M, N, P');
     const chars = result.esp32Sequence.map(s => s.char);
     assert.deepStrictEqual(chars, ['F', 'B', 'R', 'L', 'O', 'C', 'M', 'N', 'P']);
   });
@@ -75,16 +75,16 @@ describe('Parser - parseCommands', () => {
     assert.ok(result.errors.some(e => e.includes("no acepta parámetro de repetición")));
   });
 
-  it('debe rechazar P que no sea primero', () => {
-    const result = parseCommands('A, P');
+  it('debe rechazar N que no sea primero', () => {
+    const result = parseCommands('F, N');
     assert.strictEqual(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes("'P' debe ser el primer comando")));
+    assert.ok(result.errors.some(e => e.includes("'N' debe ser el primer comando")));
   });
 
-  it('debe rechazar F que no sea último', () => {
-    const result = parseCommands('F, A');
+  it('debe rechazar P que no sea último', () => {
+    const result = parseCommands('P, F');
     assert.strictEqual(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes("'F' debe ser el último comando")));
+    assert.ok(result.errors.some(e => e.includes("'P' debe ser el último comando")));
   });
 
   it('debe rechazar tokens inválidos', () => {
@@ -99,19 +99,19 @@ describe('Parser - parseCommands', () => {
     assert.ok(result.errors.some(e => e.includes("no acepta parámetro de repetición")));
   });
 
-  it('debe aceptar P como primer comando y F como último', () => {
-    const result = parseCommands('P, A, F');
+  it('debe aceptar N como primer comando y P como último', () => {
+    const result = parseCommands('N, F, P');
     assert.strictEqual(result.valid, true);
   });
 
   it('debe ignorar espacios extra', () => {
-    const result = parseCommands('  A  ,  R  ,  D  ');
+    const result = parseCommands('  F  ,  B  ,  R  ');
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.commands.length, 3);
   });
 
   it('debe ignorar tokens vacíos entre comas', () => {
-    const result = parseCommands('A,,R,,D');
+    const result = parseCommands('F,,B,,R');
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.commands.length, 3);
   });
@@ -121,7 +121,7 @@ describe('Parser - parseCommands', () => {
 describe('Parser - getCommandInfo', () => {
 
   it('debe retornar info de comando válido', () => {
-    const info = getCommandInfo('A');
+    const info = getCommandInfo('F');
     assert.deepStrictEqual(info, { esp32: 'F', name: 'Avanzar', type: 'movement' });
   });
 
@@ -135,7 +135,7 @@ describe('Parser - getCommandInfo', () => {
 describe('Parser - COMMAND_MAP', () => {
 
   it('debe tener todos los comandos definidos', () => {
-    const expected = ['A', 'R', 'D', 'I', 'O', 'C', 'P', 'F', 'M'];
+    const expected = ['F', 'B', 'R', 'L', 'O', 'C', 'N', 'P', 'M'];
     for (const cmd of expected) {
       assert.ok(COMMAND_MAP[cmd], `Falta comando ${cmd}`);
     }

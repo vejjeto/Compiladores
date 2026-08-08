@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { info, warn, error } from '../utils/logger.js';
-import { parseCommands, getCommandInfo, validateCommands, buildESP32Sequence, COMMAND_MAP } from '../core/parser.js';
-import { classifyNumber, selectRandomNumber, NUMBER_TABLE } from '../core/encriptador.js';
+import { parseCommands, getCommandInfo, validateCommands, buildESP32Sequence } from '../core/parser.js';
+import { clasificarNumero, generarNumero, decodificarPrograma } from '../core/encriptador.js';
 
 const COMPONENT = 'TRANSMISOR';
 const MAX_RETRIES = 3;
@@ -29,15 +29,6 @@ export class TransmisorService {
       };
     }
 
-    if (!this.carService.connected) {
-      return {
-        ok: false,
-        status: 409,
-        valid: true,
-        error: 'No hay conexión con el carro. Conecta la ESP32 en el panel Receptor o inicia el simulador.'
-      };
-    }
-
     const sequenceId = uuidv4();
     this.startSequence(sequenceId, parsed.esp32Sequence);
 
@@ -55,89 +46,73 @@ export class TransmisorService {
     };
   }
 
-  executeEncodedProgram(steps) {
-    if (!Array.isArray(steps) || steps.length === 0) {
+  executeEncodedProgram(programa) {
+    if (typeof programa !== 'string' || programa.trim() === '') {
       return {
         ok: false,
         status: 400,
         valid: false,
-        errors: ['El campo "pasos" debe ser un array no vacío'],
-        decoded: []
+        errors: ['El campo "programa" debe ser un string no vacío'],
+        decoded: [],
+        bloques: []
       };
     }
 
-    const decoded = [];
-    const errors = [];
+    const decodedResult = decodificarPrograma(programa);
 
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      const numero = Number(step?.numero);
-      const repeticiones = Number(step?.repeticiones);
-
-      if (!Number.isInteger(numero) || numero < 1000 || numero > 9999) {
-        errors.push(`Paso ${i + 1}: 'numero' debe ser un entero de 4 dígitos`);
-        continue;
+    if (!decodedResult.valid) {
+      for (const block of decodedResult.bloques) {
+        if (block.classifiedAs && block.classifiedAs !== 'VALIDO') {
+          this.auditService.addLog({
+            command: block.command,
+            commandName: block.name,
+            esp32Char: null,
+            number: block.number,
+            classification: block.classifiedAs,
+            details: block.details,
+            results: block.results,
+            inRange: block.inRange,
+            source: 'programa-numeros'
+          });
+        }
       }
 
-      const classification = classifyNumber(numero);
-
-      if (classification.classifiedAs !== 'VALIDO') {
-        errors.push(`Paso ${i + 1}: N°${numero} rechazado (${classification.classifiedAs}): ${classification.details}`);
-        this.auditService.addLog({
-          command: classification.command,
-          commandName: classification.command ? NUMBER_TABLE[classification.command]?.name : null,
-          esp32Char: null,
-          number: numero,
-          classification: classification.classifiedAs,
-          details: classification.details,
-          results: classification.results,
-          inTable: classification.inTable,
-          source: 'programa-numeros'
-        });
-        continue;
-      }
-
-      const repetitions = Number.isInteger(repeticiones) && repeticiones >= 1 ? Math.min(repeticiones, 9) : 1;
-      const mapping = COMMAND_MAP[classification.command];
-
-      decoded.push({
-        command: classification.command,
-        repetitions,
-        numero,
-        token: `${classification.command}:${repetitions}`,
-        esp32Char: mapping.esp32,
-        name: mapping.name,
-        type: mapping.type
-      });
-    }
-
-    errors.push(...validateCommands(decoded));
-
-    if (errors.length > 0) {
-      return { ok: false, status: 400, valid: false, errors, decoded };
-    }
-
-    if (!this.carService.connected) {
       return {
         ok: false,
-        status: 409,
-        valid: true,
-        error: 'No hay conexión con el carro. Conecta la ESP32 en el panel Receptor o inicia el simulador.'
+        status: 400,
+        valid: false,
+        errors: decodedResult.errors,
+        decoded: decodedResult.decoded,
+        bloques: decodedResult.bloques
       };
     }
 
-    const sequence = buildESP32Sequence(decoded);
+    const errors = validateCommands(decodedResult.decoded);
+
+    if (errors.length > 0) {
+      return {
+        ok: false,
+        status: 400,
+        valid: false,
+        errors,
+        decoded: decodedResult.decoded,
+        bloques: decodedResult.bloques
+      };
+    }
+
+    const sequence = buildESP32Sequence(decodedResult.decoded);
     const sequenceId = uuidv4();
     this.startSequence(sequenceId, sequence);
 
-    info(COMPONENT, `Programa por números iniciado [${sequenceId}]: ${decoded.length} comandos, ${sequence.length} pasos`);
+    info(COMPONENT, `Encoded program started [${sequenceId}]: ${decodedResult.decoded.length} blocks, ${sequence.length} steps (${programa})`);
 
     return {
       ok: true,
       status: 202,
       sequenceId,
       valid: true,
-      decoded,
+      programa,
+      decoded: decodedResult.decoded,
       esp32Sequence: sequence,
       totalSteps: sequence.length
     };
@@ -215,17 +190,17 @@ export class TransmisorService {
       return { ok: false, status: 400, error: 'Número inválido' };
     }
 
-    const result = classifyNumber(Number(number));
+    const result = clasificarNumero(Number(number));
 
     this.auditService.addLog({
       command: result.command,
-      commandName: result.command ? NUMBER_TABLE[result.command]?.name : null,
+      commandName: result.name,
       esp32Char: null,
       number: result.number,
       classification: result.classifiedAs,
       details: result.details,
       results: result.results,
-      inTable: result.inTable
+      inRange: result.inRange
     });
 
     info(COMPONENT, `Número ${result.number} clasificado como ${result.classifiedAs}`);
@@ -268,8 +243,8 @@ export class TransmisorService {
 
     info(COMPONENT, `Secuencia [${sequenceId}] paso ${stepNumber}/${sequence.length}: '${cmd.char}' (${cmd.name})`);
 
-    const number = cmd.numero ?? selectRandomNumber(cmd.command);
-    const classification = number ? classifyNumber(number) : null;
+    const number = cmd.numero ?? generarNumero(cmd.command);
+    const classification = number ? clasificarNumero(number) : null;
 
     let acked = false;
     let attempt = 0;

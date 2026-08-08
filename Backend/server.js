@@ -1,14 +1,49 @@
 import http from 'http';
+import os from 'os';
 import { pathToFileURL } from 'url';
 import { info, warn, error, success } from './src/utils/logger.js';
 import { CarService } from './src/services/carService.js';
 import { AuditService } from './src/services/auditService.js';
 import { TransmisorService } from './src/services/transmisorService.js';
-import { NUMBER_TABLE } from './src/core/encriptador.js';
+import { COMMAND_RANGE, codificarPrograma } from './src/core/encriptador.js';
+import { COMMAND_MAP, MOVEMENT_COMMANDS, parseCommands } from './src/core/parser.js';
 
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 3000;
 const DEFAULT_STEP_DELAY = 350;
+
+function getLocalIpv4Addresses() {
+  const ifaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        addresses.push(iface.address);
+      }
+    }
+  }
+  return addresses.length > 0 ? addresses : ['127.0.0.1'];
+}
+
+function printAccessUrls() {
+  const ips = getLocalIpv4Addresses();
+  const displayIp = ips[0];
+  const frontendPort = process.env.FRONTEND_PORT || 8080;
+  const separator = '='.repeat(60);
+
+  console.log('');
+  console.log(separator);
+  console.log(' ACCESS URLs');
+  console.log(separator);
+  console.log(` Frontend : http://${displayIp}:${frontendPort}`);
+  console.log(` API      : http://${displayIp}:${PORT}`);
+  console.log(` Health   : http://${displayIp}:${PORT}/api/health`);
+  console.log(` Local IPs: ${ips.join(', ')}`);
+  console.log('');
+  console.log(' Open the Frontend URL on another PC (PC2) to control the robot from there.');
+  console.log(separator);
+  console.log('');
+}
 
 export function createApp(options = {}) {
   const stepDelay = options.stepDelay ?? DEFAULT_STEP_DELAY;
@@ -131,8 +166,26 @@ async function handleRequest(req, res, ctx) {
       return respond(res, 200, { logs: ctx.auditService.getLogs() });
     }
 
-    if (method === 'GET' && path === '/api/tabla') {
-      return respond(res, 200, { tabla: NUMBER_TABLE });
+    if (method === 'GET' && path === '/api/rangos') {
+      return respond(res, 200, { rangos: COMMAND_RANGE });
+    }
+
+    if (method === 'GET' && path === '/api/comandos') {
+      const comandos = Object.entries(COMMAND_MAP).map(([cmd, info]) => ({
+        comando: cmd,
+        nombre: info.name,
+        esp32: info.esp32,
+        tipo: info.type,
+        aceptaRepeticion: MOVEMENT_COMMANDS.includes(cmd)
+      }));
+      return respond(res, 200, {
+        comandos,
+        reglas: [
+          "'N' (Encender Cámara) debe ser el primer comando",
+          "'P' (Apagar Cámara) debe ser el último comando",
+          "Repetición (X:n) solo en movimientos: F, B, R, L"
+        ]
+      });
     }
 
     if (method === 'GET' && path === '/api/events') {
@@ -173,14 +226,34 @@ async function handleRequest(req, res, ctx) {
         return respond(res, result.status, result);
       }
 
-      if (path === '/api/programa-numeros') {
-        let pasos;
-        if (Array.isArray(body.pasos)) {
-          pasos = body.pasos;
-        } else if (Number.isInteger(Number(body.numero))) {
-          pasos = [{ numero: Number(body.numero), repeticiones: body.repeticiones ?? 1 }];
+      if (path === '/api/codificar') {
+        if (typeof body.program !== 'string' || body.program.trim() === '') {
+          return respond(res, 400, { ok: false, valid: false, errors: ['El campo "program" es obligatorio'], commands: [] });
         }
-        const result = ctx.transmisorService.executeEncodedProgram(pasos);
+
+        const parsed = parseCommands(body.program);
+
+        if (!parsed.valid) {
+          return respond(res, 400, { ok: false, valid: false, errors: parsed.errors, commands: parsed.commands });
+        }
+
+        const encoded = codificarPrograma(parsed.commands);
+
+        return respond(res, 200, {
+          ok: true,
+          valid: true,
+          program: parsed.raw,
+          numeroUnico: encoded.numeroUnico,
+          bloques: encoded.bloques,
+          totalSteps: encoded.bloques.length
+        });
+      }
+
+      if (path === '/api/programa-numeros') {
+        if (typeof body.programa !== 'string' || body.programa.trim() === '') {
+          return respond(res, 400, { ok: false, valid: false, errors: ['El campo "programa" debe ser un string no vacío'], decoded: [], bloques: [] });
+        }
+        const result = ctx.transmisorService.executeEncodedProgram(body.programa.trim());
         return respond(res, result.status, result);
       }
 
@@ -226,15 +299,18 @@ if (isMain) {
     info(COMPONENT, 'Rutas disponibles:');
     info(COMPONENT, '  POST /api/connect     - Conectar al carro (WebSocket)');
     info(COMPONENT, '  POST /api/program     - Ejecutar programa de comandos');
-    info(COMPONENT, '  POST /api/programa-numeros - Ejecutar programa de números encriptados');
+    info(COMPONENT, '  POST /api/codificar   - Codificar programa de comandos a número único');
+    info(COMPONENT, '  POST /api/programa-numeros - Ejecutar programa encriptado (número único)');
     info(COMPONENT, '  POST /api/command     - Comando individual');
     info(COMPONENT, '  POST /api/raw         - Enviar char crudo al carro');
     info(COMPONENT, '  POST /api/classify    - Clasificar un número');
-    info(COMPONENT, '  GET  /api/tabla       - Tabla de números autorizados');
+    info(COMPONENT, '  GET  /api/rangos      - Rangos de números autorizados por comando');
+    info(COMPONENT, '  GET  /api/comandos    - Comandos disponibles y sus reglas');
     info(COMPONENT, '  GET  /api/audit       - Log de auditoría acumulado');
     info(COMPONENT, '  GET  /api/events      - Eventos SSE (streaming)');
     info(COMPONENT, '  GET  /api/health      - Estado del servidor');
     info(COMPONENT, `CORS habilitado (*) - escuchando en todas las interfaces para red local`);
+    printAccessUrls();
   });
 
   function closeAll() {
