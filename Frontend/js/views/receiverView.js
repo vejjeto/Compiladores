@@ -5,6 +5,7 @@ class ReceiverView {
 
     this.espUrlInput = document.getElementById('rx-esp-url');
     this.connectBtn = document.getElementById('rx-connect-btn');
+    this.autodetectBtn = document.getElementById('rx-autodetect-btn');
     this.disconnectBtn = document.getElementById('rx-disconnect-btn');
     this.logConsole = document.getElementById('rx-log-console');
     this.statusEl = document.getElementById('rx-esp-status');
@@ -15,6 +16,7 @@ class ReceiverView {
     this.verifyBtn = document.getElementById('rx-verify-btn');
 
     this.PRIMES = [41, 43, 47, 53, 59, 61];
+    this.currentLine = [];
 
     this.bindEvents();
     this.connectBackend();
@@ -31,6 +33,10 @@ class ReceiverView {
     this.connectBtn.addEventListener('click', () => this.connectToCar());
     this.disconnectBtn.addEventListener('click', () => this.disconnectFromCar());
     this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
+
+    if (this.autodetectBtn) {
+      this.autodetectBtn.addEventListener('click', () => this.autoDetectCar());
+    }
 
     if (this.verifyBtn) {
       this.verifyBtn.addEventListener('click', () => this.verifyNumber());
@@ -83,6 +89,15 @@ class ReceiverView {
     if (log.classification) parts.push(log.classification);
     if (log.details) parts.push(log.details);
     if (log.step != null) parts.push(`paso ${log.step}/${log.total}`);
+
+    if (log.step != null && log.number != null) {
+      if (log.step === 1) this.currentLine = [];
+      this.currentLine.push(log.number);
+      if (log.step === log.total) {
+        this.addAuditLog(`Línea de comandos recibida: ${this.currentLine.join(', ')}`, 'command');
+        this.currentLine = [];
+      }
+    }
 
     const message = parts.join(' | ') || 'Evento de auditoría';
     this.addAuditLog(message, this.logType(log.classification));
@@ -148,6 +163,71 @@ class ReceiverView {
     } catch (err) {
       this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
     }
+  }
+
+  async autoDetectCar() {
+    if (this.autodetectBtn) this.autodetectBtn.disabled = true;
+    this.addAuditLog('Buscando simulador/carro en la red...', 'info');
+
+    const host = window.location.hostname || '127.0.0.1';
+    const candidates = [
+      'ws://127.0.0.1:8081/ws',
+      `ws://${host}:8081/ws`
+    ];
+    const uniqueCandidates = [...new Set(candidates)];
+
+    for (const url of uniqueCandidates) {
+      this.addAuditLog(`Probando ${url}...`, 'info');
+      const found = await this.probeWebSocket(url);
+      if (!found) continue;
+
+      this.addAuditLog(`Simulador/carro detectado en ${url}`, 'valid');
+      this.espUrlInput.value = url;
+      await this.connectToCar();
+      if (this.autodetectBtn) this.autodetectBtn.disabled = false;
+      return;
+    }
+
+    this.addAuditLog('No se encontró el simulador/carro. Verifique que esté encendido o ingrese la IP manualmente.', 'invalid');
+    if (this.autodetectBtn) this.autodetectBtn.disabled = false;
+  }
+
+  probeWebSocket(url, timeout = 1500) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let ws;
+
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        resolve(false);
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { ws.close(); } catch { }
+        resolve(false);
+      }, timeout);
+
+      ws.onopen = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { ws.close(); } catch { }
+        resolve(true);
+      };
+
+      ws.onerror = () => { };
+
+      ws.onclose = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(false);
+      };
+    });
   }
 
   async disconnectFromCar() {

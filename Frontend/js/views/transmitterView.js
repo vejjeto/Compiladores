@@ -3,7 +3,8 @@ class TransmitterView {
     this.backendUrl = backendUrl;
     this.eventSource = null;
     this.activeSequenceId = null;
-    this.numberTable = null;
+    this.pendingSteps = [];
+    this.pendingTotal = 0;
 
     this.commandInput = document.getElementById('tx-command-input');
     this.executeBtn = document.getElementById('tx-execute-btn');
@@ -19,23 +20,11 @@ class TransmitterView {
 
     this.bindEvents();
     this.connectBackend();
-    this.loadNumberTable();
   }
 
   updateBackendUrl(url) {
     this.backendUrl = url;
     this.connectBackend();
-    this.loadNumberTable();
-  }
-
-  async loadNumberTable() {
-    try {
-      const res = await fetch(`${this.backendUrl}/api/tabla`);
-      const data = await res.json();
-      this.numberTable = data.tabla;
-    } catch {
-      this.numberTable = null;
-    }
   }
 
   bindEvents() {
@@ -66,28 +55,41 @@ class TransmitterView {
     this.eventSource.addEventListener('SEQUENCE_STARTED', (e) => {
       const data = JSON.parse(e.data);
       this.activeSequenceId = data.sequenceId;
+      this.pendingSteps = [];
+      this.pendingTotal = data.totalSteps;
       this.addLog(`Secuencia iniciada (${data.totalSteps} pasos)`, 'command');
     });
 
     this.eventSource.addEventListener('STEP_SENT', (e) => {
       const data = JSON.parse(e.data);
       if (data.sequenceId !== this.activeSequenceId) return;
-      this.addLog(
-        `Paso ${data.step}/${data.total} → ${data.message} | N°${data.encryptedNumber} ${data.classification}`,
-        'valid'
-      );
+      if (Array.isArray(this.pendingSteps)) this.pendingSteps.push(data);
     });
 
     this.eventSource.addEventListener('SEQUENCE_COMPLETED', (e) => {
       const data = JSON.parse(e.data);
       if (data.sequenceId !== this.activeSequenceId) return;
+      const steps = this.pendingSteps || [];
+
+      if (steps.length > 0) {
+        this.addLog(`Secuencia ejecutada (${steps.length} pasos):`, 'valid');
+        for (const s of steps) {
+          this.addLog(
+            `  ${s.step}/${s.total}) N°${s.encryptedNumber} → ${s.message} (${s.classification})`,
+            'valid'
+          );
+        }
+      }
+
       this.addLog(`Programa completado (${data.duration}ms)`, 'valid');
+      this.pendingSteps = [];
     });
 
     this.eventSource.addEventListener('SEQUENCE_ERROR', (e) => {
       const data = JSON.parse(e.data);
       if (data.sequenceId !== this.activeSequenceId) return;
       this.addLog(`Error de secuencia en paso ${data.step}: ${data.message}`, 'invalid');
+      this.pendingSteps = [];
     });
   }
 
@@ -120,42 +122,34 @@ class TransmitterView {
       return;
     }
 
-    if (!this.numberTable) {
-      await this.loadNumberTable();
-      if (!this.numberTable) {
-        this.addLog(`No se pudo obtener la tabla de números (${this.backendUrl})`, 'invalid');
+    let numeroUnico;
+
+    try {
+      const codRes = await fetch(`${this.backendUrl}/api/codificar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ program })
+      });
+
+      const codData = await codRes.json();
+
+      if (!codRes.ok) {
+        (codData.errors || []).forEach(err => this.addLog(err, 'invalid'));
         return;
       }
-    }
 
-    const actionCommands = ['P', 'F', 'O', 'C', 'M'];
-    const tokens = program.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    const pasos = [];
+      numeroUnico = codData.numeroUnico;
 
-    for (const token of tokens) {
-      const match = token.match(/^([A-Z])(?::([1-9]))?$/);
-
-      if (!match) {
-        this.addLog(`Token inválido '${token}'`, 'invalid');
-        continue;
+      for (const block of codData.bloques) {
+        if (Array.isArray(block.intentos) && block.intentos.length > 0) {
+          const fallidos = block.intentos.map(n => `${n} ✗`).join(', ');
+          this.addLog(`Buscando para ${block.command}: ${fallidos}, ${block.numero} ✓`, 'info');
+        }
+        this.addLog(`N°${block.numero} → ${block.name} (${block.command})`, 'command');
       }
-
-      const [, cmd, repStr] = match;
-      const entry = this.numberTable[cmd];
-
-      if (!entry) {
-        this.addLog(`Comando desconocido '${cmd}'`, 'invalid');
-        continue;
-      }
-
-      const repetitions = actionCommands.includes(cmd) ? 1 : (repStr ? parseInt(repStr, 10) : 1);
-      const numero = entry.numbers[Math.floor(Math.random() * entry.numbers.length)];
-      pasos.push({ numero, repeticiones: repetitions });
-      this.addLog(`N°${numero} ×${repetitions} → ${entry.name} (${cmd})`, 'command');
-    }
-
-    if (pasos.length === 0) {
-      this.addLog('No se generó ningún paso válido', 'invalid');
+      this.addLog(`Programa encriptado: ${numeroUnico}`, 'command');
+    } catch (err) {
+      this.addLog(`No se pudo contactar al backend (${this.backendUrl}): ${err.message}`, 'invalid');
       return;
     }
 
@@ -163,7 +157,7 @@ class TransmitterView {
       const res = await fetch(`${this.backendUrl}/api/programa-numeros`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pasos })
+        body: JSON.stringify({ programa: numeroUnico })
       });
 
       const data = await res.json();
@@ -186,12 +180,13 @@ class TransmitterView {
       this.activeSequenceId = data.sequenceId;
       this.addLog(`Enviado al Receptor: ${data.decoded.length} comandos encriptados, ${data.totalSteps} pasos`, 'info');
       this.addLog(`Secuencia ESP32: [${data.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
+      this.addLog(`Línea de comandos (dígitos): ${data.decoded.map(d => d.numero).join(', ')}`, 'command');
       this.addLog('Esperando confirmaciones OK_*...', 'info');
 
-      if (data.decoded.some(c => c.command === 'P') && !this.videoActive) {
+      if (data.decoded.some(c => c.command === 'N') && !this.videoActive) {
         this.startVideo();
       }
-      if (data.decoded.some(c => c.command === 'F') && this.videoActive) {
+      if (data.decoded.some(c => c.command === 'P') && this.videoActive) {
         this.stopVideo();
       }
     } catch (err) {
@@ -203,7 +198,7 @@ class TransmitterView {
     if (this.videoPlaceholder) this.videoPlaceholder.classList.add('hidden');
     if (this.videoOverlay) this.videoOverlay.classList.remove('hidden');
     this.videoActive = true;
-    this.addLog('Cámara encendida (P)', 'valid');
+    this.addLog('Cámara encendida (N)', 'valid');
 
     try {
       const res = await fetch(`${this.backendUrl}/api/health`);
@@ -226,7 +221,7 @@ class TransmitterView {
     this.videoOverlay.classList.add('hidden');
     this.videoActive = false;
     if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
-    this.addLog('Cámara apagada (F)', 'warn');
+    this.addLog('Cámara apagada (P)', 'warn');
   }
 
   addLog(message, type = 'info') {

@@ -38,23 +38,31 @@
       </div>
       <div class="panel-body">
         <div class="form-group">
-          <label>Programa de Comandos</label>
+          <label>Programa de comandos</label>
           <textarea
             class="form-input"
             id="tx-command-input"
-            placeholder="P, A:3, R:2, D, O, C, F"
             spellcheck="false"
-          ></textarea>
+          >F:7, R:4, L:9</textarea>
         </div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="tx-execute-btn">Ejecutar Programa</button>
-          <button class="btn btn-danger" id="tx-clear-btn">Limpiar</button>
+        <div class="btn-group btn-program">
+          <button class="btn btn-primary" id="tx-execute-btn">Enviar Programa</button>
+          <button class="btn btn-ghost" id="tx-clear-btn">Limpiar</button>
         </div>
+
+        <div class="cmd-reference">
+          <div class="cmd-legend">
+            <div class="cmd-row"><b>F</b>:<b>n</b> Avanzar &middot; <b>B</b>:<b>n</b> Retroceder &middot; <b>R</b>:<b>n</b> Girar Derecha &middot; <b>L</b>:<b>n</b> Girar Izquierda</div>
+            <div class="cmd-row"><b>O</b> Abrir Pinza &middot; <b>C</b> Cerrar Pinza &middot; <b>N</b> Encender C&aacute;mara &middot; <b>P</b> Apagar C&aacute;mara &middot; <b>M</b> Liberar Control</div>
+            <div class="cmd-row"><b>N</b> al inicio &middot; <b>P</b> al final &middot; <b>n</b> = 1-9 &middot; O/C/N/P/M sin :n</div>
+          </div>
+        </div>
+
         <div class="video-container" id="tx-video-container">
           <img id="tx-video-player" alt="Stream de cámara">
           <div class="video-placeholder" id="tx-video-placeholder">
             <span class="icon">&#9655;</span>
-            <span>Esperando comando P para iniciar stream</span>
+            <span>Esperando comando N para iniciar stream</span>
           </div>
           <div class="video-overlay hidden" id="tx-video-overlay">LIVE</div>
         </div>
@@ -95,6 +103,7 @@
         </div>
         <div class="btn-group">
           <button class="btn btn-primary" id="rx-connect-btn">Conectar Carro</button>
+          <button class="btn btn-ghost" id="rx-autodetect-btn">Auto-Detect</button>
           <button class="btn btn-danger" id="rx-disconnect-btn">Desconectar</button>
         </div>
 

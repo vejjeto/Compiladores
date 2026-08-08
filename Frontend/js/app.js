@@ -1,7 +1,7 @@
 class App {
   constructor() {
     this.currentRole = 'transmitter';
-    this.backendUrl = localStorage.getItem('backendUrl') || `${window.location.protocol}//${window.location.hostname}:3000`;
+    this.backendUrl = this.normalizeBackendUrl(localStorage.getItem('backendUrl')) || this.inferBackendUrl();
 
     this.transmitterView = new TransmitterView(this.backendUrl);
     this.receiverView = new ReceiverView(this.backendUrl);
@@ -18,6 +18,35 @@ class App {
     this.backendApplyBtn = document.getElementById('backend-url-apply');
 
     this.init();
+  }
+
+  inferBackendUrl() {
+    return `${window.location.protocol}//${window.location.hostname}:3000`;
+  }
+
+  normalizeBackendUrl(raw) {
+    if (!raw) return null;
+
+    let value = String(raw).trim().replace(/\/+$/, '');
+
+    // Colapsar protocolos duplicados (ej: http://http://host → http://host)
+    value = value.replace(/^(https?:\/\/)+/i, (match) => {
+      const proto = match.toLowerCase().includes('https') ? 'https://' : 'http://';
+      return proto;
+    });
+
+    // Si no tiene protocolo, agregar http://
+    if (!/^https?:\/\//i.test(value)) {
+      value = `http://${value}`;
+    }
+
+    try {
+      const parsed = new URL(value);
+      if (!parsed.hostname) return null;
+      return value;
+    } catch {
+      return null;
+    }
   }
 
   init() {
@@ -41,7 +70,12 @@ class App {
   }
 
   applyBackendUrl() {
-    const value = (this.backendInput.value.trim() || `${window.location.protocol}//${window.location.hostname}:3000`).replace(/\/+$/, '');
+    const value = this.normalizeBackendUrl(this.backendInput.value);
+    if (!value) {
+      this.transmitterView.addLog('URL de backend inválida. Usá el formato http://IP:3000', 'invalid');
+      this.receiverView.addAuditLog('URL de backend inválida. Usá el formato http://IP:3000', 'invalid');
+      return;
+    }
     this.backendUrl = value;
     localStorage.setItem('backendUrl', value);
     this.transmitterView.updateBackendUrl(value);
@@ -93,6 +127,7 @@ class App {
     clickBtn('tx-clear-logs-btn');
     clickBtn('rx-connect-btn');
     clickBtn('rx-disconnect-btn');
+    clickBtn('rx-autodetect-btn');
     clickBtn('rx-clear-logs-btn');
     clickBtn('rx-verify-btn');
     clickBtn('backend-url-apply');
