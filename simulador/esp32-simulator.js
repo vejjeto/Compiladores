@@ -1,7 +1,22 @@
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
+import os from 'os';
 
 const PORT = 8081;
+
+function getLocalIp() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
+
+const LOCAL_IP = getLocalIp();
 const MJPEG_BOUNDARY = 'frame';
 const MJPEG_FRAME = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCABaAKADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDh6KKKoQUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFSR280qs0UUjqv3iqkgfWo6v2gWa3EVx5QgUswfzQHQ8Z+XPPTpiqirik7FX7NP5PneRJ5XXfsO386T7PPuK+TJkEAjaeM9Pzq0E/4lON8WfN37fMXOMY6ZzV1b+M3kodkVUcEuDnfiRcY+gq1BN2ZDk+hjrFI4BVGbJwMDvSIjSOEjUsx6BRkmtO2227QRPLFuMrtlZAQBtwMnOBUFqiWrSvPKqsEwpiZZDk8dj6Z796lQ/r5D5itHbTyqzRwyOF+8VUnFIsEzxNKsTtGvVgpIH41pyCOTLQTxqDOJcs4UqCATxnsewpWmjkuYrmOVEgjL7kLAHlifu9TkEdKrkQudmW1vMkQleGRY26OVIB/GmKpZgqglicAAcmtOWWFrJ0jcCUwxg5YEMB1A9COPXvVKyYLewMxAUSKSSeBzUuK5khqTs2I1rcJIsbQSq7fdUoQT9BQLO5aRoxbzF15KhDkfhVsl47zMcVou5WBAmBVgeuTu4/MU5vskCXC5LKyodiyjIOeQGwc4pqK6hzMorbTuHKwSME4YhCdv19KaIZTEZRE5jHBfacD8av2s/m3z3cohVS2Sxkwye6jPJ/A02BSlk8qzIzOrIqGVRtXuSCc5PYUuVWuHMzPoooqCwooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/Z', 'base64');
 
@@ -119,8 +134,10 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 wss.on('connection', handleConnection);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`  WS  → ws://0.0.0.0:${PORT}/ws`);
-  console.log(`  MJPEG → http://0.0.0.0:${PORT}/mjpeg`);
+  console.log(`  WS  → ws://${LOCAL_IP}:${PORT}/ws (desde otra PC en la red)`);
+  console.log(`  WS  → ws://127.0.0.1:${PORT}/ws (desde esta PC)`);
+  console.log(`  MJPEG → http://${LOCAL_IP}:${PORT}/mjpeg`);
+  console.log(`  IP del simulador → ${LOCAL_IP}`);
 });
 
 console.log('\nEsperando conexiones...\n');
