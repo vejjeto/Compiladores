@@ -13,6 +13,9 @@
   --led-warn: #ffb84d;
   --led-err: #ff5c6a;
 
+  --role-receiver: #3399ff;
+  --role-transmitter: var(--led-err);
+
   --trace: #4dc3ff;
 
   --text-primary: var(--phosphor-bright);
@@ -39,7 +42,6 @@
   --fs-h3: 1.25rem;
   --fs-h2: 1.5rem;
 
-  --leading-tight: 1.3;
   --leading-normal: 1.5;
   --leading-relaxed: 1.7;
 
@@ -49,7 +51,6 @@
   --space-4: 20px;
   --space-5: 24px;
   --space-6: 32px;
-  --space-7: 40px;
 
   --radius-sm: 2px;
   --radius-md: 4px;
@@ -229,12 +230,24 @@ body::after {
   box-shadow: var(--glow-ok);
 }
 
+.role-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(51, 255, 136, 0.25);
+}
+
+.transport-config {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .backend-config {
   display: flex;
   align-items: center;
   gap: var(--space-3);
 }
 
+.transport-config label,
 .backend-config label {
   font-size: var(--fs-caption);
   color: var(--text-tertiary);
@@ -255,6 +268,10 @@ body::after {
 @media (max-width: 1080px) {
   .backend-config input {
     width: 150px;
+  }
+
+  .transport-config label {
+    display: none;
   }
 }
 
@@ -316,13 +333,13 @@ body::after {
 }
 
 .badge-transmitter {
-  border-color: var(--border-ok);
-  color: var(--phosphor);
+  border-color: var(--role-transmitter);
+  color: var(--role-transmitter);
 }
 
 .badge-receiver {
-  border-color: var(--border-ok);
-  color: var(--phosphor);
+  border-color: var(--role-receiver);
+  color: var(--role-receiver);
 }
 
 .panel-body {
@@ -615,6 +632,8 @@ textarea.form-input {
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-md);
   overflow-y: auto;
+  content-visibility: auto;
+  contain: size style;
   font-family: var(--font-mono);
   font-size: var(--fs-caption);
   line-height: 1.8;
@@ -702,7 +721,7 @@ textarea.form-input {
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-lg);
   font-weight: 600;
-  font-size: var(--fs-h3);
+  font-size: var(--fs-h2);
   text-align: center;
   letter-spacing: 0.14em;
   text-transform: uppercase;

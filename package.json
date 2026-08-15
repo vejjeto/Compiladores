@@ -4,7 +4,7 @@
   "description": "Sistema de Control Robótico vía WebSockets",
   "private": true,
   "scripts": {
-    "start": "concurrently \"npm start --prefix Backend\" \"npm start --prefix Frontend\"",
+    "start": "concurrently \"npm start --prefix Backend\" \"npm start --prefix Frontend\" \"npm start --prefix simulador\"",
     "start:backend": "npm start --prefix Backend",
     "start:frontend": "npm start --prefix Frontend",
     "install:all": "npm install --prefix Backend && npm install --prefix Frontend && npm install",

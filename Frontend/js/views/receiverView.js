@@ -1,7 +1,8 @@
 class ReceiverView {
-  constructor(backendUrl) {
-    this.backendUrl = backendUrl;
-    this.eventSource = null;
+  constructor(client) {
+    this.client = client;
+    this.backendDown = false;
+    this.listenersRegistered = false;
 
     this.espUrlInput = document.getElementById('rx-esp-url');
     this.connectBtn = document.getElementById('rx-connect-btn');
@@ -17,14 +18,9 @@ class ReceiverView {
 
     this.PRIMES = [41, 43, 47, 53, 59, 61];
     this.currentLine = [];
+    this.lastEspState = null;
 
     this.bindEvents();
-    this.connectBackend();
-    this.loadAuditHistory();
-  }
-
-  updateBackendUrl(url) {
-    this.backendUrl = url;
     this.connectBackend();
     this.loadAuditHistory();
   }
@@ -44,33 +40,42 @@ class ReceiverView {
   }
 
   connectBackend() {
-    if (this.eventSource) {
-      this.eventSource.close();
+    if (!this.listenersRegistered) {
+      this.listenersRegistered = true;
+      this.client.onEvent(({type, data}) => this._handleServerEvent(type, data));
+      this.client.onStatus((state) => {
+        if (state === 'disconnected' || state === 'fallback-http') {
+          if (!this.backendDown) {
+            this.backendDown = true;
+            this.addAuditLog(`Backend sin conexión (${this.client.baseUrl})`, 'invalid');
+          }
+        } else {
+          this.backendDown = false;
+        }
+      });
     }
+    this.client.connect();
+  }
 
-    this.eventSource = new EventSource(`${this.backendUrl}/api/events`);
-
-    this.eventSource.addEventListener('AUDIT_LOG', (e) => {
-      this.renderAudit(JSON.parse(e.data));
-    });
-
-    this.eventSource.addEventListener('CAR_STATUS', (e) => {
-      this.handleCarStatus(JSON.parse(e.data));
-    });
-
-    this.eventSource.addEventListener('CAR_MESSAGE', (e) => {
-      const data = JSON.parse(e.data);
+  _handleServerEvent(type, data) {
+    if (type === 'AUDIT_LOG') {
+      this.renderAudit(data);
+    } else if (type === 'CAR_STATUS') {
+      this.handleCarStatus(data);
+    } else if (type === 'CAR_MESSAGE') {
       this.addAuditLog(`Carro: ${data.message}`, 'info');
-    });
+    }
   }
 
   async loadAuditHistory() {
+    this.logConsole.innerHTML = '';
+    this.currentLine = [];
     try {
-      const res = await fetch(`${this.backendUrl}/api/audit`);
-      const data = await res.json();
+      const res = await this.client.request('audit');
+      const data = res.data;
       (data.logs || []).forEach(log => this.renderAudit(log));
     } catch {
-      this.addAuditLog(`No se pudo contactar al backend (${this.backendUrl})`, 'invalid');
+      this.addAuditLog(`No se pudo contactar al backend (${this.client.baseUrl})`, 'invalid');
     }
   }
 
@@ -149,15 +154,10 @@ class ReceiverView {
 
     try {
       this.addAuditLog(`Solicitando conexión al carro ${ip}:${port}...`, 'info');
-      const res = await fetch(`${this.backendUrl}/api/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip, port })
-      });
-      const data = await res.json();
+      const res = await this.client.request('connect', { ip, port });
 
       if (!res.ok) {
-        this.addAuditLog(`Error: ${data.error}`, 'invalid');
+        this.addAuditLog('Error: ' + (res.data.error || 'Error del servidor'), 'invalid');
         return;
       }
     } catch (err) {
@@ -232,11 +232,7 @@ class ReceiverView {
 
   async disconnectFromCar() {
     try {
-      await fetch(`${this.backendUrl}/api/disconnect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}'
-      });
+      await this.client.request('disconnect', {});
     } catch (err) {
       this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
     }
@@ -251,15 +247,10 @@ class ReceiverView {
     }
 
     try {
-      const res = await fetch(`${this.backendUrl}/api/classify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: Number(value) })
-      });
-      const data = await res.json();
+      const res = await this.client.request('classify', { number: Number(value) });
 
       if (!res.ok) {
-        this.addAuditLog(`Error: ${data.error}`, 'invalid');
+        this.addAuditLog(`Error: ${res.data.error}`, 'invalid');
         return;
       }
 
@@ -301,6 +292,8 @@ class ReceiverView {
   }
 
   updateESPStatus(state) {
+    if (state === this.lastEspState) return;
+    this.lastEspState = state;
     const dot = this.statusEl.querySelector('.status-dot');
     const label = this.statusEl.querySelector('span:last-child');
 
@@ -333,6 +326,9 @@ class ReceiverView {
     `;
 
     this.logConsole.appendChild(entry);
+    while (this.logConsole.children.length > 500) {
+      this.logConsole.removeChild(this.logConsole.firstChild);
+    }
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
   }
 
@@ -348,9 +344,5 @@ class ReceiverView {
     return div.innerHTML;
   }
 
-  destroy() {
-    if (this.eventSource) {
-      this.eventSource.close();
-    }
-  }
+  destroy() {}
 }

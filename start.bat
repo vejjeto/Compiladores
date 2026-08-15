@@ -15,4 +15,4 @@ echo Iniciando servidores...
 echo   Backend:  http://localhost:3000
 echo   Frontend: http://localhost:8080
 echo.
-call npx concurrently "npm start --prefix Backend" "npm start --prefix Frontend"
+call npx concurrently "npm start --prefix Backend" "npm start --prefix Frontend" "npm start --prefix simulador"

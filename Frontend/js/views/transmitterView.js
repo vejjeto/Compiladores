@@ -1,10 +1,11 @@
 class TransmitterView {
-  constructor(backendUrl) {
-    this.backendUrl = backendUrl;
-    this.eventSource = null;
+  constructor(client) {
+    this.client = client;
+    this.listenersRegistered = false;
     this.activeSequenceId = null;
     this.pendingSteps = [];
     this.pendingTotal = 0;
+    this.lastUpdateState = null;
 
     this.commandInput = document.getElementById('tx-command-input');
     this.executeBtn = document.getElementById('tx-execute-btn');
@@ -22,11 +23,6 @@ class TransmitterView {
     this.connectBackend();
   }
 
-  updateBackendUrl(url) {
-    this.backendUrl = url;
-    this.connectBackend();
-  }
-
   bindEvents() {
     this.executeBtn.addEventListener('click', () => this.executeProgram());
     this.clearBtn.addEventListener('click', () => this.clearInput());
@@ -41,33 +37,24 @@ class TransmitterView {
   }
 
   connectBackend() {
-    if (this.eventSource) {
-      this.eventSource.close();
+    if (!this.listenersRegistered) {
+      this.listenersRegistered = true;
+      this.client.onStatus((state) => this.updateStatus(state === 'connected' ? 'connected' : (state === 'connecting' ? 'connecting' : 'disconnected')));
+      this.client.onEvent(({type, data}) => this._handleServerEvent(type, data));
     }
+    this.client.connect();
+  }
 
-    this.updateStatus('connecting');
-
-    this.eventSource = new EventSource(`${this.backendUrl}/api/events`);
-
-    this.eventSource.onopen = () => this.updateStatus('connected');
-    this.eventSource.onerror = () => this.updateStatus('connecting');
-
-    this.eventSource.addEventListener('SEQUENCE_STARTED', (e) => {
-      const data = JSON.parse(e.data);
+  _handleServerEvent(type, data) {
+    if (type === 'SEQUENCE_STARTED') {
       this.activeSequenceId = data.sequenceId;
       this.pendingSteps = [];
       this.pendingTotal = data.totalSteps;
       this.addLog(`Secuencia iniciada (${data.totalSteps} pasos)`, 'command');
-    });
-
-    this.eventSource.addEventListener('STEP_SENT', (e) => {
-      const data = JSON.parse(e.data);
+    } else if (type === 'STEP_SENT') {
       if (data.sequenceId !== this.activeSequenceId) return;
       if (Array.isArray(this.pendingSteps)) this.pendingSteps.push(data);
-    });
-
-    this.eventSource.addEventListener('SEQUENCE_COMPLETED', (e) => {
-      const data = JSON.parse(e.data);
+    } else if (type === 'SEQUENCE_COMPLETED') {
       if (data.sequenceId !== this.activeSequenceId) return;
       const steps = this.pendingSteps || [];
 
@@ -83,17 +70,16 @@ class TransmitterView {
 
       this.addLog(`Programa completado (${data.duration}ms)`, 'valid');
       this.pendingSteps = [];
-    });
-
-    this.eventSource.addEventListener('SEQUENCE_ERROR', (e) => {
-      const data = JSON.parse(e.data);
+    } else if (type === 'SEQUENCE_ERROR') {
       if (data.sequenceId !== this.activeSequenceId) return;
       this.addLog(`Error de secuencia en paso ${data.step}: ${data.message}`, 'invalid');
       this.pendingSteps = [];
-    });
+    }
   }
 
   updateStatus(state) {
+    if (state === this.lastUpdateState) return;
+    this.lastUpdateState = state;
     const dot = this.statusEl.querySelector('.status-dot');
     const label = this.statusEl.querySelector('span:last-child');
 
@@ -101,7 +87,7 @@ class TransmitterView {
     switch (state) {
       case 'connected':
         dot.classList.add('status-connected');
-        label.textContent = 'Backend conectado';
+        label.textContent = `Backend conectado (${this.client.transport === 'ws' ? 'WS' : 'HTTP'})`;
         break;
       case 'disconnected':
         dot.classList.add('status-disconnected');
@@ -125,22 +111,16 @@ class TransmitterView {
     let numeroUnico;
 
     try {
-      const codRes = await fetch(`${this.backendUrl}/api/codificar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ program })
-      });
-
-      const codData = await codRes.json();
+      const codRes = await this.client.request('codificar', { program });
 
       if (!codRes.ok) {
-        (codData.errors || []).forEach(err => this.addLog(err, 'invalid'));
+        (codRes.data.errors || []).forEach(err => this.addLog(err, 'invalid'));
         return;
       }
 
-      numeroUnico = codData.numeroUnico;
+      numeroUnico = codRes.data.numeroUnico;
 
-      for (const block of codData.bloques) {
+      for (const block of codRes.data.bloques) {
         if (Array.isArray(block.intentos) && block.intentos.length > 0) {
           const fallidos = block.intentos.map(n => `${n} ✗`).join(', ');
           this.addLog(`Buscando para ${block.command}: ${fallidos}, ${block.numero} ✓`, 'info');
@@ -149,48 +129,42 @@ class TransmitterView {
       }
       this.addLog(`Programa encriptado: ${numeroUnico}`, 'command');
     } catch (err) {
-      this.addLog(`No se pudo contactar al backend (${this.backendUrl}): ${err.message}`, 'invalid');
+      this.addLog(`No se pudo contactar al backend (${this.client.baseUrl}): ${err.message}`, 'invalid');
       return;
     }
 
     try {
-      const res = await fetch(`${this.backendUrl}/api/programa-numeros`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ programa: numeroUnico })
-      });
-
-      const data = await res.json();
+      const res = await this.client.request('programa-numeros', { programa: numeroUnico });
 
       if (res.status === 400) {
-        (data.errors || []).forEach(err => this.addLog(err, 'invalid'));
+        (res.data.errors || []).forEach(err => this.addLog(err, 'invalid'));
         return;
       }
 
       if (res.status === 409) {
-        this.addLog(data.error, 'invalid');
+        this.addLog(res.data.error, 'invalid');
         return;
       }
 
       if (!res.ok) {
-        this.addLog(data.error || 'Error del servidor', 'invalid');
+        this.addLog(res.data.error || 'Error del servidor', 'invalid');
         return;
       }
 
-      this.activeSequenceId = data.sequenceId;
-      this.addLog(`Enviado al Receptor: ${data.decoded.length} comandos encriptados, ${data.totalSteps} pasos`, 'info');
-      this.addLog(`Secuencia ESP32: [${data.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
-      this.addLog(`Línea de comandos (dígitos): ${data.decoded.map(d => d.numero).join(', ')}`, 'command');
+      this.activeSequenceId = res.data.sequenceId;
+      this.addLog(`Enviado al Receptor: ${res.data.decoded.length} comandos encriptados, ${res.data.totalSteps} pasos`, 'info');
+      this.addLog(`Secuencia ESP32: [${res.data.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
+      this.addLog(`Línea de comandos (dígitos): ${res.data.decoded.map(d => d.numero).join(', ')}`, 'command');
       this.addLog('Esperando confirmaciones OK_*...', 'info');
 
-      if (data.decoded.some(c => c.command === 'N') && !this.videoActive) {
+      if (res.data.decoded.some(c => c.command === 'N') && !this.videoActive) {
         this.startVideo();
       }
-      if (data.decoded.some(c => c.command === 'P') && this.videoActive) {
+      if (res.data.decoded.some(c => c.command === 'P') && this.videoActive) {
         this.stopVideo();
       }
     } catch (err) {
-      this.addLog(`No se pudo contactar al backend (${this.backendUrl}): ${err.message}`, 'invalid');
+      this.addLog(`No se pudo contactar al backend (${this.client.baseUrl}): ${err.message}`, 'invalid');
     }
   }
 
@@ -201,8 +175,8 @@ class TransmitterView {
     this.addLog('Cámara encendida (N)', 'valid');
 
     try {
-      const res = await fetch(`${this.backendUrl}/api/health`);
-      const health = await res.json();
+      const res = await this.client.request('health');
+      const health = res.data;
 
       if (health.carAddress && this.videoPlayer) {
         this.videoPlayer.src = `http://${health.carAddress}/mjpeg`;
@@ -236,6 +210,9 @@ class TransmitterView {
     `;
 
     this.logConsole.appendChild(entry);
+    while (this.logConsole.children.length > 500) {
+      this.logConsole.removeChild(this.logConsole.firstChild);
+    }
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
   }
 
@@ -253,9 +230,5 @@ class TransmitterView {
     return div.innerHTML;
   }
 
-  destroy() {
-    if (this.eventSource) {
-      this.eventSource.close();
-    }
-  }
+  destroy() {}
 }

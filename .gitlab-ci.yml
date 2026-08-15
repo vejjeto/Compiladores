@@ -19,7 +19,7 @@ lint:
   script:
     - npm install --prefix Backend
     - node --check Frontend/server.js
-    - node -e "import('./Backend/src/core/parser.js'); import('./Backend/src/core/automatas.js'); import('./Backend/src/core/encriptador.js'); import('./Backend/src/services/carService.js'); import('./Backend/src/services/auditService.js'); import('./Backend/src/services/transmisorService.js')"
+    - node -e "import('./Backend/src/core/parser.js'); import('./Backend/src/core/automatas.js'); import('./Backend/src/core/encriptador.js'); import('./Backend/src/services/carService.js'); import('./Backend/src/services/auditService.js'); import('./Backend/src/services/transmisorService.js'); import('./Backend/src/ports/carPort.js'); import('./Backend/src/adapters/wsCarAdapter.js'); import('./Backend/src/protocol/commands.js')"
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

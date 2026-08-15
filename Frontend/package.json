@@ -4,8 +4,7 @@
   "description": "Frontend SPA - Sistema de Control Robótico vía WebSockets",
   "private": true,
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "keywords": ["robotics", "websocket", "compilers", "automata"],
   "author": "Diego Safar",
