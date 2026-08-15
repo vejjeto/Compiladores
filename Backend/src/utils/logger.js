@@ -8,19 +8,15 @@ const COLORS = {
   BLUE: '\x1b[34m',
   MAGENTA: '\x1b[35m',
   CYAN: '\x1b[36m',
-  WHITE: '\x1b[37m',
-  BG_RED: '\x1b[41m',
-  BG_GREEN: '\x1b[42m',
-  BG_YELLOW: '\x1b[43m',
-  BG_BLUE: '\x1b[44m'
+  WHITE: '\x1b[37m'
 };
 
 const LEVEL_CONFIG = {
   INFO: { color: COLORS.CYAN, icon: 'ℹ', bg: '' },
   WARN: { color: COLORS.YELLOW, icon: '⚠', bg: '' },
-  ERROR: { color: COLORS.RED, icon: '✗', bg: COLORS.BG_RED },
+  ERROR: { color: COLORS.RED, icon: '✗' },
   DEBUG: { color: COLORS.DIM, icon: '◆', bg: '' },
-  SUCCESS: { color: COLORS.GREEN, icon: '✓', bg: COLORS.BG_GREEN },
+  SUCCESS: { color: COLORS.GREEN, icon: '✓' },
   EVENT: { color: COLORS.MAGENTA, icon: '●', bg: '' }
 };
 
@@ -50,9 +46,6 @@ export function log(component, level, message, data) {
 }
 
 export default class logger {
-  /**
-   * Logs an info message.
-   */
   static info(component, message, data) {
     log(component, 'INFO', message, data);
   }

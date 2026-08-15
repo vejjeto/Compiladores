@@ -49,8 +49,18 @@ Proyecto_Compiladores/
 │   │   │   ├── parser.js        # Lexer/Sintáctico + semántica de programas
 │   │   │   ├── automatas.js     # AFD de residuos (divisibilidad por 6 primos)
 │   │   │   └── encriptador.js   # Rangos por comando + generación/decodificación del número único
+│   │   ├── protocol/
+│   │   │   ├── commands.js      # Vocabulario de comandos + dialecto JSON v1 del carro (build/parse/ack)
+│   │   │   └── clientProtocol.js # Envelope v1 cliente↔backend (request/response/event/ping/pong)
+│   │   ├── http/
+│   │   │   └── handlers.js      # Lógica compartida de cada acción (la usa HTTP y WS)
+│   │   ├── ports/
+│   │   │   └── carPort.js       # Contrato abstracto del carro (CarPort)
+│   │   ├── adapters/
+│   │   │   ├── wsCarAdapter.js  # Adaptador WebSocket del carro (implementa CarPort, dialectos legacy/json)
+│   │   │   └── wsServerAdapter.js # Servidor WebSocket propio en /ws/api (híbrido HTTP+WS)
 │   │   ├── services/
-│   │   │   ├── carService.js    # Cliente WebSocket hacia el carro (ESP32)
+│   │   │   ├── carService.js    # Fachada del carro (extiende WsCarAdapter, dialecto legacy)
 │   │   │   ├── auditService.js  # Log de auditoría + hub de eventos SSE
 │   │   │   └── transmisorService.js # Ejecución de programas, envío al carro y clasificación
 │   │   └── utils/
@@ -61,13 +71,19 @@ Proyecto_Compiladores/
 │       ├── encriptador.test.js
 │       ├── api-flujo-integral.test.js
 │       ├── flujo-numeros.test.js
-│       └── ack-reintento.test.js
+│       ├── ack-reintento.test.js
+│       ├── protocol-commands.test.js   # Vocabulario y dialecto JSON v1 del carro
+│       ├── auditoria-invalidos.test.js # Bloques INVALIDO llegan a la auditoría
+│       ├── simulador-integracion.test.js # Control, ACK y dialecto contra el simulador real
+│       └── ws-hybrid.test.js   # API por WebSocket: request/response, eventos y ping/pong
 ├── Frontend/
 │   ├── package.json
 │   ├── server.js                # Servidor de archivos estáticos (SPA)
 │   ├── index.html
 │   ├── css/style.css
 │   └── js/
+│       ├── services/
+│       │   └── backendClient.js # Cliente híbrido: WS primero, fallback HTTP+SSE
 │       ├── app.js               # Orquestador de vistas + configuración del backend
 │       └── views/
 │           ├── transmitterView.js   # Panel del operador (Transmisor - encripta)
@@ -89,6 +105,22 @@ Proyecto_Compiladores/
 - Escucha en `0.0.0.0:3000` para permitir conexiones desde otras PCs de la red.
 - Habilita **CORS** en todas las respuestas (`Access-Control-Allow-Origin: *`) y responde `OPTIONS` (preflight) para peticiones cross-origin.
 - Expone `/api/events` como **SSE** para notificaciones en tiempo real.
+- Monta el **servidor WebSocket propio** (`WsServerAdapter`) en `ws://0.0.0.0:3000/ws/api` — el backend es **híbrido**: la misma API responde por HTTP, SSE y WebSocket (ver sección 5.2).
+- Todas las rutas delegan en `src/http/handlers.js`, la capa compartida que usan tanto el router HTTP como el dispatcher WS (misma lógica, mismo resultado).
+
+#### `src/http/handlers.js` — Lógica compartida HTTP/WS
+- Un handler por acción (`health`, `rangos`, `connect`, `disconnect`, `programa-numeros`, `program`, `codificar`, `command`, `raw`, `classify`, `audit`), con el contrato `(ctx, body) → { ok, status, data, error }`.
+- El router HTTP y el dispatcher WS llaman a los **mismos handlers**, por lo que un request por HTTP y por WS ejecuta exactamente el mismo código y devuelve el mismo payload.
+
+#### `src/protocol/clientProtocol.js` — Envelope cliente↔backend
+- Versión y builders del protocolo WS propio: `buildRequest`, `buildResponse`, `buildEvent`, `buildPong`, `buildError` y `parseClientMessage`.
+- Los clientes hablan con el backend con `{v:1, type:'request'|'response'|'event'|'ping'|'pong'|'error', requestId, action, data}` (detalle en sección 5.2).
+
+#### `src/adapters/wsServerAdapter.js` — Servidor WebSocket propio
+- `WebSocketServer` sobre el mismo servidor HTTP, ruta `/ws/api`.
+- Dispatcher: recibe `request` → busca el handler → responde `response` con el mismo `requestId`; `ping` → `pong`; mensaje inválido → `error`.
+- Heartbeat cada 30s (`ping`/`isAlive`) para limpiar conexiones muertas.
+- `broadcast(event, data)`: reenvía a todos los clientes WS los mismos eventos que el hub de auditoría emite a SSE (dual push).
 
 #### `src/core/parser.js` — Parser de programas
 - Convierte el **lenguaje del proyecto** en **comandos del carro**.
@@ -139,12 +171,15 @@ Proyecto_Compiladores/
 - `POST /api/programa-numeros` recibe ese string, lo corta en bloques de 4 dígitos, valida cada bloque (debe clasificar `VALIDO`) y ejecuta la secuencia en el carro.
 - El `numeroUnico` puede superar `Number.MAX_SAFE_INTEGER`: **siempre se trata como string** (nunca como Number) y se corta con `string.slice`.
 
-#### `src/services/carService.js` — Cliente WebSocket del carro
-- Conecta el backend al carro: `ws://<ip>:<puerto>/ws`.
-- `connect(ip, port)`: abre la conexión, con timeout de 5s y eventos de estado (`connected`, `disconnected`, `error`).
-- `sendCommand(char)`: envía **el char crudo** (texto) por el WebSocket; el carro lee el primer byte.
-- `waitForAck(char, timeout)`: envía el char y resuelve `true` cuando el carro responde `ACK:<char>` (o `false` al vencer el timeout). Si un ACK tardío llegara sin espera registrada se descarta.
-- Emite eventos `status` y `message` (mensajes de texto del carro, ej. "Control asignado a tu IP").
+#### `src/services/carService.js` — Fachada del carro
+- **Fachada fina:** `CarService` extiende `WsCarAdapter` con el dialecto `legacy` por defecto. El `server.js` lo usa igual que antes (`connect`, `disconnect`, `sendCommand`, `waitForAck`), pero la implementación real vive en el adaptador.
+- **`src/ports/carPort.js` — Contrato (puerto):** clase abstracta `CarPort` (extiende `EventEmitter`) que declara el contrato del carro: `connected`, `address`, `connect(ip, port)`, `disconnect()`, `sendCommand(command)`, `waitForAck(command, timeout)`. Lanza error si se usa sin implementar; permite conectar otros transportes (BLE, serial, mock) sin tocar el resto del sistema.
+- **`src/adapters/wsCarAdapter.js` — Adaptador WebSocket:** implementa `CarPort` sobre `ws`. Gestiona timeout de conexión (5s), eventos `status`/`message`, ACK pendientes con timeout (5s) y soporta dos dialectos:
+  - `legacy` (default): envía el char crudo y espera `ACK:<char>`.
+  - `json`: envía comandos del dialecto v1 (`{"v":1,"cmd":"F","params":{},"ackId":"<uuid>"}`) y resuelve los ACK por `ackId`.
+  - `setDialect(dialect)` permite cambiar el dialecto en caliente; `sendCommandJson()` envía y devuelve el `ackId` generado.
+  - Los mensajes entrantes se parsean con `src/protocol/commands.js` (`parseMessage` + `matchAck`).
+- **`src/protocol/commands.js` — Protocolo:** centraliza el vocabulario (`VOCABULARY`: char, nombre, tipo y nombre estándar por comando), `buildCommand()`/`buildAck()` para el dialecto JSON v1 y `parseMessage()`/`matchAck()` para entender ACK legacy (`ACK:X`) o JSON (`ackId`). Un ACK tardío sin espera registrada se descarta.
 
 #### `src/services/auditService.js` — Auditoría y eventos
 - Guarda un **log acumulado** de auditoría (máximo 500 entradas, FIFO).
@@ -181,33 +216,45 @@ Proyecto_Compiladores/
 - Protección contra path traversal y fallback a `index.html`.
 
 #### `js/app.js` — Orquestador
-- Crea ambas vistas y gestiona el cambio de rol (Transmisor/Receptor).
-- **Configuración del backend:** permite cambiar la URL del backend (campo en la barra superior), persistida en `localStorage`. Por defecto `http://<host>:3000`.
+- Crea el `BackendClient` compartido y ambas vistas; gestiona el cambio de rol (Transmisor/Receptor).
+- **Configuración del backend:** permite cambiar la URL del backend (campo en la barra superior), persistida en `localStorage`. Por defecto `http://<host>:3000`. Al cambiar la URL, llama `client.setBaseUrl(url)` (reconexión automática).
+
+#### `js/services/backendClient.js` — Cliente híbrido (WS primero, HTTP+SSE de respaldo)
+- **Un solo cliente para todo el frontend**: `request(action, data)` y `onEvent(cb)` reemplazan los `fetch`/`EventSource` directos de las views.
+- **Transporte:** intenta WebSocket (`ws://<host>:3000/ws/api`, envelope v1). Si no conecta en 3s o se cae y agota 5 reintentos con backoff (1s→16s), **cae automáticamente a HTTP+SSE** (`fetch` + `EventSource`). El frontend nunca se queda mudo.
+- **Modos de transporte (selector en la barra superior, persistido en `localStorage`):**
+  - **Auto** (default): WS primero, con fallback a HTTP+SSE.
+  - **WS:** fuerza WebSocket. Si el backend no responde, **reintenta infinito** (backoff 1s→16s) y **nunca cae a HTTP** — útil para probar el sistema 100% por WS; los requests fallan con "WS no disponible" mientras reconecta.
+  - **HTTP:** fuerza HTTP+SSE, nunca usa WebSocket.
+- `request()` devuelve `{ ok, status, data, error }` igual por WS y por HTTP (mismo contrato que la sección 5.2).
+- `onStatus(cb)` informa `connecting` / `connected` / `fallback-http` / `disconnected` para los indicadores de las vistas. El indicador del Transmisor muestra `Backend conectado (WS)` o `Backend conectado (HTTP)` según el transporte activo.
 
 #### `js/views/transmitterView.js` — Panel del Transmisor (operador que encripta)
 - **Función:** encriptar programas y enviar el número único al Receptor.
-- Al presionar "Ejecutar Programa": envía el texto (`N, F:3, B:2, R, O, C, P`) a `POST /api/codificar`, que devuelve el `numeroUnico` y sus bloques. Luego envía ese string a `POST /api/programa-numeros`.
-- El log muestra el comando **ya encriptado**: por cada bloque aparece su número (`N°1272 → Avanzar (F)`) y el programa completo (`Programa encriptado: 127213783572...`), además de la secuencia ESP32 decodificada y las confirmaciones `OK_*` por SSE (`SEQUENCE_STARTED`, `STEP_SENT`, `SEQUENCE_COMPLETED`, `SEQUENCE_ERROR`).
-- **Cámara:** si el programa contiene `N` muestra el stream; con carro/simulador conectado apunta a `http://<ip>:8081/mjpeg` (tomada de `/api/health`); con `P` lo oculta. Con hardware real se documenta la URL RTSP (no reproducible en navegador).
+- Al presionar "Ejecutar Programa": envía el texto (`N, F:3, B:2, R, O, C, P`) a `codificar`, que devuelve el `numeroUnico` y sus bloques. Luego envía ese string a `programa-numeros` (por el transporte activo del cliente).
+- El log muestra el comando **ya encriptado**: por cada bloque aparece su número (`N°1272 → Avanzar (F)`) y el programa completo (`Programa encriptado: 127213783572...`), además de la secuencia ESP32 decodificada y las confirmaciones `OK_*` (`SEQUENCE_STARTED`, `STEP_SENT`, `SEQUENCE_COMPLETED`, `SEQUENCE_ERROR`) recibidas por evento del cliente (WS o SSE).
+- **Cámara:** si el programa contiene `N` muestra el stream; con carro/simulador conectado apunta a `http://<ip>:8081/mjpeg` (tomada de `health`); con `P` lo oculta. Con hardware real se documenta la URL RTSP (no reproducible en navegador).
 
 #### `js/views/receiverView.js` — Panel del Receptor (auditoría ciega)
 - **Función:** conectar el backend al carro y auditar los mensajes.
-- Conectar Carro: `POST /api/connect` con IP/puerto del carro.
-- Recibe por SSE:
+- Conectar Carro: `connect` con IP/puerto del carro.
+- Recibe por evento del cliente (WS o SSE):
   - `AUDIT_LOG`: renderiza el desglose del autómata (marcas ✓/✗ por primo), el dictamen (`VALIDO`/`FALSO`/`CORRUPTO`) y el mensaje en la consola.
   - `CAR_STATUS`: actualiza el indicador de conexión del carro.
   - `CAR_MESSAGE`: muestra mensajes de texto del carro.
-- Al iniciar, carga el historial con `GET /api/audit`.
-- **Verificar Número:** campo para clasificar manualmente un número (`POST /api/classify`).
+- Al iniciar, carga el historial con `audit`; al volver a la pestaña Receptor se recarga (sin duplicados).
+- **Verificar Número:** campo para clasificar manualmente un número (`classify`).
 
 ### 3.3 Simulador (`simulador/esp32-simulator.js`)
 - **Función:** imitar el comportamiento del carro real para poder probar el sistema sin hardware.
-- Escucha en `0.0.0.0:8081` con dos endpoints:
-  - **WebSocket** `ws://0.0.0.0:8081/ws`: mismo protocolo que el firmware real (recibe **1 byte crudo** por mensaje; comandos `F B R L N P O C M`; control único).
+- Escucha en `0.0.0.0` (puerto `8081` por defecto, configurable con la variable de entorno `SIM_PORT`) con dos endpoints:
+  - **WebSocket** `ws://0.0.0.0:8081/ws`: mismo protocolo que el firmware real (comandos `F B R L N P O C M`; control único). Acepta **dos dialectos**:
+    - **Legacy:** un char crudo por mensaje (byte crudo, como el firmware).
+    - **JSON v1:** `{"v":1,"cmd":"F","params":{},"ackId":"<id>"}` → responde `{"v":1,"ack":true,"cmd":"F","status":"done","ackId":"<id>"}`.
   - **HTTP MJPEG** `http://0.0.0.0:8081/mjpeg`: stream multipart `multipart/x-mixed-replace` con un frame JPEG embebido (cámara simulada, ~5 fps).
 - Comandos: `F` Avanzar, `B` Retroceder, `R` Girar Derecha, `L` Girar Izquierda, `N` Cámara Encendida, `P` Cámara Apagada, `O` Abrir Pinza, `C` Cerrar Pinza, `M` Liberar Control.
-- **Confirmación:** tras ejecutar cada comando de acción responde `ACK:<char>`, que el backend usa para avanzar al siguiente paso.
-- Control único: la primera conexión recibe "Control asignado a tu IP"; las demás "ERROR: Control ocupado".
+- **Confirmación:** tras ejecutar cada comando de acción responde `ACK:<char>` (legacy) o el ACK JSON con el mismo `ackId` (v1), que el backend usa para avanzar al siguiente paso.
+- Control único: la primera conexión recibe "Control asignado a tu IP"; las demás "ERROR: Control ocupado". El comando `M` libera el control **solo si lo envía el cliente que lo posee**; un cliente no controlador recibe "ERROR: Control ocupado".
 
 ---
 
@@ -285,6 +332,8 @@ Esta sección explica **el viaje completo de un programa**, desde que lo escrib�
 ---
 
 ## 4. API HTTP del Backend
+
+> **Híbrido:** cada endpoint de esta sección tiene su equivalente por WebSocket (misma acción, mismo handler, mismo payload) — ver sección 5.2.
 
 Base URL: `http://<host>:3000` (CORS habilitado para cualquier origen).
 
@@ -473,7 +522,7 @@ sse.addEventListener('STEP_SENT', (e) => {
 ## 5. Protocolo del carro (WebSocket)
 
 - **URL:** `ws://<ip_del_carro>/ws` (el firmware real usa el puerto 80; el simulador usa 8081).
-- **Formato:** el backend envía **un carácter por mensaje** (texto). El carro procesa `data[0]`.
+- **Formato legacy (byte crudo):** el backend envía **un carácter por mensaje** (texto). El carro procesa `data[0]`.
 - **Repertorio de comandos del carro:**
 
 | Char | Acción |
@@ -489,6 +538,49 @@ sse.addEventListener('STEP_SENT', (e) => {
 | `M` | Liberar Control |
 
 - **Control único:** el carro asigna el control a la primera conexión ("Control asignado a tu IP"); cualquier otra recibe "ERROR: Control ocupado". Por eso el backend es el único que debe conectarse.
+- **Dialecto JSON v1 (interoperabilidad con otros proyectos):** además del byte crudo, el protocolo acepta comandos JSON con versión, comando y `ackId` opcional:
+
+```json
+{ "v": 1, "cmd": "F", "params": {}, "ackId": "abc-123" }
+```
+
+El carro/simulador responde con el mismo `ackId`:
+
+```json
+{ "v": 1, "ack": true, "cmd": "F", "status": "done", "ackId": "abc-123" }
+```
+
+- El dialecto JSON es **auto-detectado** por el receptor: un mensaje que empieza con `{` se parsea como JSON v1; cualquier otro mensaje se interpreta como byte crudo legacy. El backend usa `legacy` por defecto (compatible con el firmware) y puede cambiar a `json` con `setDialect('json')` (los ACK JSON se resuelven por `ackId`).
+
+### 5.2 Protocolo cliente↔backend (WebSocket híbrido)
+
+El backend expone su propia API por WebSocket en `ws://<host>:3000/ws/api` (mismo servidor y puerto que HTTP, ruta dedicada). Es la **misma API de la sección 4**: cada `action` del envelope corresponde a una ruta HTTP y ejecuta el mismo handler.
+
+- **URL:** `ws://<ip_del_backend>:3000/ws/api`
+- **Envelope (v1):**
+
+| Dirección | Tipo | Contenido |
+|-----------|------|-----------|
+| Cliente → Servidor | `request` | `{v:1, type:'request', requestId:'<id>', action:'<action>', data:{...}}` |
+| Cliente → Servidor | `ping` | `{v:1, type:'ping'}` |
+| Servidor → Cliente | `response` | `{v:1, type:'response', requestId, ok, status, data, error}` |
+| Servidor → Cliente | `event` | `{v:1, type:'event', event:'AUDIT_LOG', data:{...}}` |
+| Servidor → Cliente | `pong` | `{v:1, type:'pong'}` |
+| Servidor → Cliente | `error` | `{v:1, type:'error', requestId, message}` |
+
+- **Acciones** (mismas de la sección 4): `health`, `rangos`, `connect`, `disconnect`, `programa-numeros`, `program`, `codificar`, `command`, `raw`, `classify`, `audit`.
+- **Ejemplo** (equivalente a `POST /api/programa-numeros`):
+
+```json
+{"v":1,"type":"request","requestId":"r1","action":"programa-numeros","data":{"programa":"12721378..."}}
+```
+
+```json
+{"v":1,"type":"response","requestId":"r1","ok":true,"status":202,"data":{"sequenceId":"...","decoded":[...],"totalSteps":5,"esp32Sequence":[...]}}
+```
+
+- **Eventos:** el servidor reenvía por WS los mismos eventos que emite por SSE (`AUDIT_LOG`, `CAR_STATUS`, `CAR_MESSAGE`, `SEQUENCE_STARTED`, `STEP_SENT`, `SEQUENCE_COMPLETED`, `SEQUENCE_ERROR`, `STEP_RETRY`).
+- **Heartbeat:** el servidor hace `ping` cada 30s; el cliente puede responder con `pong` para mantener viva la conexión.
 
 ---
 
@@ -506,7 +598,7 @@ cd Proyecto_Compiladores
 
 # 2. Instalar dependencias
 npm run install:all
-# (equivale a: npm install --prefix Backend && npm install --prefix Frontend && npm install)
+# (equivale a: npm install --prefix Backend && npm install --prefix Frontend && npm install --prefix simulador && npm install)
 
 # 3. Iniciar todo (backend + frontend)
 npm start
@@ -585,6 +677,10 @@ Los tests usan el runner nativo de Node (`node --test`) y cubren:
 | `test/api-flujo-integral.test.js` | Flujo E2E por texto y por número único: API HTTP + conexión WebSocket a un carro mock |
 | `test/flujo-numeros.test.js` | Flujo E2E encriptado: `POST /api/programa-numeros`, `POST /api/codificar`, `GET /api/rangos`, descomposición y `OK_*` |
 | `test/ack-reintento.test.js` | Confirmación ACK y regla de espera: reintento y `SEQUENCE_ERROR` cuando el carro no responde |
+| `test/protocol-commands.test.js` | Vocabulario de comandos, `buildCommand`/`parseMessage`/`matchAck` y el dialecto JSON v1 |
+| `test/auditoria-invalidos.test.js` | Bloques `INVALIDO` llevan `classifiedAs: 'INVALIDO'` y el rechazo queda registrado en la auditoría |
+| `test/simulador-integracion.test.js` | Spawnea el simulador real (puerto `SIM_PORT` alto): control único, ACK legacy, dialecto JSON v1 y stream MJPEG |
+| `test/ws-hybrid.test.js` | API por WebSocket contra el backend real: `request`/`response` (health, rangos), status 400 preservado, **dual push** de eventos (`AUDIT_LOG` por WS), `ping`/`pong` y mensaje malformado → `error` |
 
 **Ejecutar todos los tests:**
 ```bash
@@ -594,6 +690,8 @@ cd Backend && npm test
 ```
 
 **Con carro simulado (mock) incluido:** los tests de integración levantan un carro falso, conectan el backend y verifican que el carro reciba la secuencia exacta (`NFFFBBROCP` por texto; `FFFR` para un programa encriptado de `F:3, R`) y que la auditoría registre las entradas `VALIDO`.
+
+**Con el simulador real:** `test/simulador-integracion.test.js` levanta `simulador/esp32-simulator.js` en un puerto alto (nunca 8081) y verifica el protocolo de punta a punta: la primera conexión toma el control, un cliente ajeno recibe "ERROR: Control ocupado" incluso si envía `M`, los comandos legacy responden `ACK:<char>`, los comandos JSON v1 responden con el mismo `ackId`, y `/mjpeg` responde `multipart/x-mixed-replace`. En CI, el stage `test` instala las dependencias del simulador antes de correr la suite.
 
 ---
 
@@ -635,6 +733,15 @@ cd Backend && npm test
 - **Cambios anteriores (resumen):** comunicación Transmisor↔Backend por **HTTP (REST + SSE)**; carro **solo WebSocket** con byte crudo; esquema directo del carro (`F B R L O C N P M`); comando `M`; rangos de **1000 números por comando**; `CORRUPTO` = divisible por 2+ primos.
 - **Confirmación ACK por paso (regla de espera):** el backend espera `ACK:<char>` del carro antes de avanzar; sin ACK en 5s reintenta hasta 3 veces (evento `STEP_RETRY`) y si se agotan emite `SEQUENCE_ERROR`. El simulador responde `ACK:<char>` por comando.
 - **Formato de la consigna (reemplazado):** el payload `{ numero, repeticiones, timestamp }` quedó superado por el número único `{ programa }`. `ack-reintento.test.js` sigue cubriendo la regla de espera/ACK con el nuevo payload.
+- **Capa de puerto/adaptador (`protocol` + `ports` + `adapters`):** `carService.js` quedó como fachada fina; el contrato vive en `src/ports/carPort.js`, la implementación WebSocket en `src/adapters/wsCarAdapter.js` y el vocabulario/dialecto en `src/protocol/commands.js`. El adaptador soporta dos dialectos (`legacy`/`json`) y auto-detecta los mensajes entrantes. `protocol-commands.test.js` cubre el vocabulario y el dialecto.
+- **Simulador — robustez y dialecto JSON v1:** acepta `SIM_PORT` desde el entorno; detecta comandos JSON v1 (`{"v":1,"cmd":"F","ackId":...}` → ACK JSON con el mismo `ackId`); `M` libera el control solo si lo envía el dueño (un cliente ajeno recibe "ERROR: Control ocupado"); el ACK ya no se pierde si el control cambia entre el envío y la respuesta; se agregó `res.on('error')` al stream MJPEG para que un socket roto no tumbe el proceso.
+- **Encriptador:** los bloques inválidos ahora llevan `classifiedAs: 'INVALIDO'` (además de `classification` por compatibilidad), de modo que el Receptor audita el rechazo de bloques fuera de rango. Regresión cubierta por `auditoria-invalidos.test.js`.
+- **Logger:** se eliminó la configuración de color de fondo (`bg`) muerta de los niveles ERROR/SUCCESS y las constantes `BG_*` sin uso; la salida por consola no cambia.
+- **Frontend — higiene de sesión:** `loadAuditHistory` limpia la consola antes de recargar el historial (evita duplicados al cambiar la URL del backend); las consolas del Transmisor y del Receptor se limitan a 500 entradas; `switchRole` cierra el SSE de la vista inactiva y reactiva el de la activa; el Receptor avisa una sola vez por caída de backend ("Backend sin conexión") y limpia la bandera al reconectar.
+- **Instalación/CI:** `install:all` ahora instala también `simulador` (sus dependencias propias) y el stage `test` de GitLab CI hace lo mismo antes de correr la suite, porque `simulador-integracion.test.js` spawnea el simulador real.
+- **Backend híbrido (HTTP + WS):** nueva capa `src/http/handlers.js` con la lógica compartida de las 11 acciones; `server.js` delega todas las rutas a los handlers (comportamiento idéntico, los tests lo prueban). Nuevo servidor WebSocket propio en `ws://0.0.0.0:3000/ws/api` (`src/adapters/wsServerAdapter.js`) con envelope v1 (`src/protocol/clientProtocol.js`), dispatcher de requests, heartbeat 30s y reenvío de los mismos eventos que SSE. Los 6 tests de `ws-hybrid.test.js` prueban request/response, status 400 preservado, dual push de `AUDIT_LOG`, ping/pong y malformado.
+- **Frontend híbrido:** nuevo `js/services/backendClient.js` — un solo cliente que intenta WS (`ws://<host>:3000/ws/api`) y cae automáticamente a HTTP+SSE si no conecta en 3s o tras 5 reintentos de reconexión con backoff (1s→16s). Las views ya no usan `fetch`/`EventSource` directo: todo pasa por `request()`/`onEvent()`/`onStatus()`. `app.js` crea el cliente compartido y `switchRole` ya no necesita cerrar EventSources por vista (el transporte es único).
+- **Selector de modo de transporte (Auto/WS/HTTP):** en la barra superior del Frontend, con el mismo estilo que las pestañas Transmisor/Receptor. El modo se persiste en `localStorage` y `BackendClient` lo aplica con `setMode(mode)`: **Auto** = WS primero con fallback a HTTP+SSE (default); **WS** = fuerza WebSocket y si el backend no responde **reintenta infinito** (backoff 1s→16s) sin caer jamás a HTTP; **HTTP** = fuerza HTTP+SSE sin WebSocket. El indicador del Transmisor muestra `Backend conectado (WS)` / `Backend conectado (HTTP)` según el transporte activo, lo que permite probar cada modo sin DevTools.
 
 ---
 

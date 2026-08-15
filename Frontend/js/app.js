@@ -3,12 +3,15 @@ class App {
     this.currentRole = 'transmitter';
     this.backendUrl = this.normalizeBackendUrl(localStorage.getItem('backendUrl')) || this.inferBackendUrl();
 
-    this.transmitterView = new TransmitterView(this.backendUrl);
-    this.receiverView = new ReceiverView(this.backendUrl);
+    const transportMode = localStorage.getItem('transportMode') || 'auto';
+    this.client = new BackendClient(this.backendUrl, transportMode);
+    this.transmitterView = new TransmitterView(this.client);
+    this.receiverView = new ReceiverView(this.client);
 
     this.hookBeeps();
 
-    this.roleButtons = document.querySelectorAll('.role-btn');
+    this.roleButtons = document.querySelectorAll('[data-role]');
+    this.transportButtons = document.querySelectorAll('[data-transport]');
     this.views = {
       transmitter: document.getElementById('view-transmitter'),
       receiver: document.getElementById('view-receiver')
@@ -29,13 +32,11 @@ class App {
 
     let value = String(raw).trim().replace(/\/+$/, '');
 
-    // Colapsar protocolos duplicados (ej: http://http://host → http://host)
     value = value.replace(/^(https?:\/\/)+/i, (match) => {
       const proto = match.toLowerCase().includes('https') ? 'https://' : 'http://';
       return proto;
     });
 
-    // Si no tiene protocolo, agregar http://
     if (!/^https?:\/\//i.test(value)) {
       value = `http://${value}`;
     }
@@ -54,6 +55,21 @@ class App {
       btn.addEventListener('click', () => {
         this.switchRole(btn.dataset.role);
       });
+    });
+
+    this.transportButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.transport;
+        this.client.setMode(mode);
+        localStorage.setItem('transportMode', mode);
+        this.transportButtons.forEach(b => {
+          b.classList.toggle('active', b.dataset.transport === mode);
+        });
+      });
+    });
+
+    this.transportButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.transport === this.client.mode);
     });
 
     if (this.backendInput) {
@@ -78,8 +94,7 @@ class App {
     }
     this.backendUrl = value;
     localStorage.setItem('backendUrl', value);
-    this.transmitterView.updateBackendUrl(value);
-    this.receiverView.updateBackendUrl(value);
+    this.client.setBaseUrl(value);
     this.transmitterView.addLog(`Backend configurado: ${value}`, 'info');
     this.receiverView.addAuditLog(`Backend configurado: ${value}`, 'info');
   }
@@ -98,6 +113,10 @@ class App {
     });
 
     this.views[role].classList.add('active');
+
+    if (role === 'receiver') {
+      this.receiverView.loadAuditHistory();
+    }
   }
 
   hookBeeps() {
@@ -134,6 +153,7 @@ class App {
   }
 
   destroy() {
+    this.client.destroy();
     this.transmitterView.destroy();
     this.receiverView.destroy();
   }

@@ -20,6 +20,14 @@
       <button class="role-btn active" data-role="transmitter">Transmisor</button>
       <button class="role-btn" data-role="receiver">Receptor</button>
     </div>
+    <div class="transport-config">
+      <label>Transporte</label>
+      <div class="role-switch">
+        <button class="role-btn active" data-transport="auto">Auto</button>
+        <button class="role-btn" data-transport="ws">WS</button>
+        <button class="role-btn" data-transport="http">HTTP</button>
+      </div>
+    </div>
     <div class="backend-config">
       <label>Backend</label>
       <input type="text" id="backend-url-input" placeholder="http://192.168.1.10:3000" spellcheck="false">
@@ -163,6 +171,7 @@
     </div>
   </div>
 
+  <script src="js/services/backendClient.js"></script>
   <script src="js/views/transmitterView.js"></script>
   <script src="js/views/receiverView.js"></script>
   <script src="js/app.js"></script>

@@ -2,11 +2,14 @@ import http from 'http';
 import os from 'os';
 import { pathToFileURL } from 'url';
 import { info, warn, error, success } from './src/utils/logger.js';
+import logger from './src/utils/logger.js';
 import { CarService } from './src/services/carService.js';
 import { AuditService } from './src/services/auditService.js';
 import { TransmisorService } from './src/services/transmisorService.js';
-import { COMMAND_RANGE, codificarPrograma } from './src/core/encriptador.js';
-import { COMMAND_MAP, MOVEMENT_COMMANDS, parseCommands } from './src/core/parser.js';
+import * as encriptador from './src/core/encriptador.js';
+import { COMMAND_MAP, MOVEMENT_COMMANDS } from './src/core/parser.js';
+import { HANDLERS } from './src/http/handlers.js';
+import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
 
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 3000;
@@ -74,11 +77,20 @@ export function createApp(options = {}) {
     });
   });
 
+  const ctx = { carService, auditService, transmisorService, encriptador };
+
   const httpServer = http.createServer((req, res) => {
-    handleRequest(req, res, { carService, auditService, transmisorService });
+    handleRequest(req, res, ctx);
   });
 
-  return { httpServer, carService, auditService, transmisorService };
+  const wsServer = new WsServerAdapter({ server: httpServer, ctx, logger });
+  wsServer.start();
+
+  auditService.subscribe(({ type, data }) => {
+    wsServer.broadcast(type, data);
+  });
+
+  return { httpServer, carService, auditService, transmisorService, wsServer };
 }
 
 function setCors(res) {
@@ -94,6 +106,10 @@ function respond(res, code, data) {
     'Content-Length': Buffer.byteLength(body)
   });
   res.end(body);
+}
+
+function respondResult(res, result) {
+  respond(res, result.status, result.data);
 }
 
 function readBody(req) {
@@ -155,19 +171,15 @@ async function handleRequest(req, res, ctx) {
 
   try {
     if (method === 'GET' && path === '/api/health') {
-      return respond(res, 200, {
-        status: 'ok',
-        carConnected: ctx.carService.connected,
-        carAddress: ctx.carService.address
-      });
+      return respondResult(res, await HANDLERS.health(ctx, {}));
     }
 
     if (method === 'GET' && path === '/api/audit') {
-      return respond(res, 200, { logs: ctx.auditService.getLogs() });
+      return respondResult(res, await HANDLERS.audit(ctx, {}));
     }
 
     if (method === 'GET' && path === '/api/rangos') {
-      return respond(res, 200, { rangos: COMMAND_RANGE });
+      return respondResult(res, await HANDLERS.rangos(ctx, {}));
     }
 
     if (method === 'GET' && path === '/api/comandos') {
@@ -200,82 +212,21 @@ async function handleRequest(req, res, ctx) {
         return respond(res, 400, { ok: false, error: err.message });
       }
 
-      if (path === '/api/connect') {
-        const { ip, port } = body;
-        if (!ip) {
-          return respond(res, 400, { ok: false, error: 'La IP del carro es obligatoria' });
-        }
-        try {
-          const result = await ctx.carService.connect(ip, port || 80);
-          return respond(res, 200, result);
-        } catch (err) {
-          return respond(res, 502, { ok: false, error: err.message });
-        }
-      }
+      const routeHandlers = {
+        '/api/connect': HANDLERS.connect,
+        '/api/disconnect': HANDLERS.disconnect,
+        '/api/program': HANDLERS.program,
+        '/api/codificar': HANDLERS.codificar,
+        '/api/programa-numeros': HANDLERS['programa-numeros'],
+        '/api/command': HANDLERS.command,
+        '/api/raw': HANDLERS.raw,
+        '/api/classify': HANDLERS.classify
+      };
 
-      if (path === '/api/disconnect') {
-        ctx.carService.disconnect();
-        return respond(res, 200, { ok: true, status: 'disconnected' });
-      }
+      const handler = routeHandlers[path];
 
-      if (path === '/api/program') {
-        if (typeof body.program !== 'string') {
-          return respond(res, 400, { ok: false, error: 'El campo "program" es obligatorio' });
-        }
-        const result = ctx.transmisorService.executeProgram(body.program);
-        return respond(res, result.status, result);
-      }
-
-      if (path === '/api/codificar') {
-        if (typeof body.program !== 'string' || body.program.trim() === '') {
-          return respond(res, 400, { ok: false, valid: false, errors: ['El campo "program" es obligatorio'], commands: [] });
-        }
-
-        const parsed = parseCommands(body.program);
-
-        if (!parsed.valid) {
-          return respond(res, 400, { ok: false, valid: false, errors: parsed.errors, commands: parsed.commands });
-        }
-
-        const encoded = codificarPrograma(parsed.commands);
-
-        return respond(res, 200, {
-          ok: true,
-          valid: true,
-          program: parsed.raw,
-          numeroUnico: encoded.numeroUnico,
-          bloques: encoded.bloques,
-          totalSteps: encoded.bloques.length
-        });
-      }
-
-      if (path === '/api/programa-numeros') {
-        if (typeof body.programa !== 'string' || body.programa.trim() === '') {
-          return respond(res, 400, { ok: false, valid: false, errors: ['El campo "programa" debe ser un string no vacío'], decoded: [], bloques: [] });
-        }
-        const result = ctx.transmisorService.executeEncodedProgram(body.programa.trim());
-        return respond(res, result.status, result);
-      }
-
-      if (path === '/api/command') {
-        if (!body.command) {
-          return respond(res, 400, { ok: false, error: 'El campo "command" es obligatorio' });
-        }
-        const result = ctx.transmisorService.executeCommand(body.command, body.repetitions);
-        return respond(res, result.status, result);
-      }
-
-      if (path === '/api/raw') {
-        if (!body.char || typeof body.char !== 'string') {
-          return respond(res, 400, { ok: false, error: 'El campo "char" es obligatorio' });
-        }
-        const result = ctx.transmisorService.sendRawChar(body.char);
-        return respond(res, result.status, result);
-      }
-
-      if (path === '/api/classify') {
-        const result = ctx.transmisorService.classifyNumber(body.number);
-        return respond(res, result.status, result);
+      if (handler) {
+        return respondResult(res, await handler(ctx, body));
       }
     }
 
@@ -309,6 +260,7 @@ if (isMain) {
     info(COMPONENT, '  GET  /api/audit       - Log de auditoría acumulado');
     info(COMPONENT, '  GET  /api/events      - Eventos SSE (streaming)');
     info(COMPONENT, '  GET  /api/health      - Estado del servidor');
+    info(COMPONENT, '  WS   /ws/api          - API WebSocket híbrida');
     info(COMPONENT, `CORS habilitado (*) - escuchando en todas las interfaces para red local`);
     printAccessUrls();
   });

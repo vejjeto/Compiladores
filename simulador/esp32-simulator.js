@@ -1,8 +1,8 @@
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import os from 'os';
 
-const PORT = 8081;
+const PORT = Number(process.env.SIM_PORT) || 8081;
 
 function getLocalIp() {
   const ifaces = os.networkInterfaces();
@@ -34,19 +34,7 @@ const COMMAND_ACTIONS = {
 
 let controlClient = null;
 
-function procesarComando(client, char) {
-  if (char === 'M') {
-    controlClient = null;
-    client.send('Control liberado');
-    console.log(`[CMD] 'M' → Control liberado`);
-    setTimeout(() => {
-      const response = `ACK:${char}`;
-      console.log(`[RSP] ${response}`);
-      client.send(response);
-    }, 150);
-    return;
-  }
-
+function procesarComando(client, char, ackId = null) {
   if (controlClient !== null && controlClient !== client) {
     client.send('ERROR: Control ocupado');
     console.log(`[CMD] Intento de control desde IP distinta → rechazado`);
@@ -57,13 +45,29 @@ function procesarComando(client, char) {
     controlClient = client;
   }
 
+  if (char === 'M') {
+    controlClient = null;
+    client.send('Control liberado');
+    console.log(`[CMD] 'M' → Control liberado`);
+    setTimeout(() => {
+      const response = ackId
+        ? JSON.stringify({ v: 1, ack: true, cmd: char, status: 'done', ackId })
+        : `ACK:${char}`;
+      console.log(`[RSP] ${response}`);
+      if (client.readyState === WebSocket.OPEN) client.send(response);
+    }, 150);
+    return;
+  }
+
   const action = COMMAND_ACTIONS[char] || 'Acción desconocida';
   console.log(`[CMD] Recibido: '${char}' → ${action}`);
 
   setTimeout(() => {
-    const response = `ACK:${char}`;
+    const response = ackId
+      ? JSON.stringify({ v: 1, ack: true, cmd: char, status: 'done', ackId })
+      : `ACK:${char}`;
     console.log(`[RSP] ${response}`);
-    if (controlClient === client) client.send(response);
+    if (client.readyState === WebSocket.OPEN) client.send(response);
   }, 150);
 }
 
@@ -80,6 +84,21 @@ function handleConnection(ws) {
 
   ws.on('message', (data) => {
     const msg = data.toString();
+    const trimmed = msg.trim();
+
+    if (trimmed.startsWith('{')) {
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+      if (parsed && parsed.v === 1 && typeof parsed.cmd === 'string' && parsed.cmd.length === 1) {
+        procesarComando(ws, parsed.cmd, parsed.ackId ?? null);
+      }
+      return;
+    }
+
     for (const char of msg) {
       procesarComando(ws, char);
     }
@@ -114,6 +133,7 @@ function handleMjpeg(req, res) {
 
   req.on('close', () => clearInterval(interval));
   res.on('close', () => clearInterval(interval));
+  res.on('error', () => clearInterval(interval));
 }
 
 console.log('╔══════════════════════════════════════════╗');

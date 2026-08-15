@@ -1,26 +1,3 @@
-/*
- * ESP32_CAR - Firmware refactorizado
- * -----------------------------------
- * Cambios respecto a la versión original:
- *  1. setup() ya NO bloquea: todo el flujo de credenciales/WiFi es una
- *     máquina de estados en loop() (evita el panic del task watchdog).
- *  2. leerLineaBLE(): lector BLE no bloqueante con timeout (antes se colgaba).
- *  3. WiFi con timeout: si las credenciales fallan, vuelve a pedirlas por BLE.
- *  4. Control por client->id() (antes remoteIP() podía quedar en 0.0.0.0
- *     en el evento de disconnect y el control quedaba ocupado para siempre).
- *  5. Guard de len==0 en WS_EVT_DATA.
- *  6. Confirmaciones en formato ACK:<comando> (alineado con Backend y
- *     simulador; antes enviaba "C.E <comando>" y el backend nunca lo veía).
- *  7. Limpieza: sin malloc, defines muertos eliminados, setVelocidad solo
- *     en comandos de movimiento, sin callback RX en la característica TX.
- *
- * PROTOCOLO WS (byte crudo):
- *  -> F/B/L/R: mover 15cm / girar 90° (ACK cuando TERMINA de moverse)
- *  -> O/C: abrir/cerrar pinza (ACK cuando TERMINA el servo)
- *  -> N/P: encender/apagar cámara, M: liberar control (ACK inmediato)
- *  <- ACK:F, ACK:B, ... (formato que espera Backend/src/services/carService.js)
- */
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <AsyncTCP.h>
@@ -38,7 +15,6 @@ NimBLECharacteristic* pTxChar = nullptr;
 String ipWiFi   = "";
 bool   ipEnviada = false;
 
-// Buffer circular para datos BLE entrantes
 #define BLE_BUF_SIZE 128
 volatile char bleBuf[BLE_BUF_SIZE];
 volatile int  bleHead = 0;
@@ -63,7 +39,6 @@ void blePrintln(const char* msg) {
   blePrint(msg);
   if (pTxChar) { pTxChar->setValue((uint8_t*)"\r\n", 2); pTxChar->notify(); }
 }
-// Envía prefijo + valor + salto de línea en un único notify
 void blePrintPair(const char* label, const char* value) {
   char buf[128];
   snprintf(buf, sizeof(buf), "%s%s\r\n", label, value);
@@ -89,17 +64,14 @@ void iniciarBLE() {
 
   NimBLEService* pService = pServer->createService(serviceUUID);
 
-  // TX: ESP32 -> celular (notify)  — sin callbacks: nunca recibe writes
   pTxChar = pService->createCharacteristic(charTxUUID, NIMBLE_PROPERTY::NOTIFY);
 
-  // RX: celular -> ESP32 (write)
   NimBLECharacteristic* pRxChar = pService->createCharacteristic(
     charRxUUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   pRxChar->setCallbacks(new RxCallbacks());
 
   pService->start();
 
-  // Advertising: UUID NUS en paquete principal, nombre en scan response
   NimBLEAdvertisementData advData;
   advData.setCompleteServices(serviceUUID);
 
@@ -109,14 +81,11 @@ void iniciarBLE() {
   NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
   pAdv->setAdvertisementData(advData);
   pAdv->setScanResponseData(scanData);
-  pAdv->setMinInterval(0x20);   // ~20 ms
-  pAdv->setMaxInterval(0x40);   // ~40 ms
+  pAdv->setMinInterval(0x20);
+  pAdv->setMaxInterval(0x40);
   pAdv->start();
 }
 
-// ============================================================================
-// Servidor WebSocket + prototipos (declarados antes de manejarSetup)
-// ============================================================================
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
@@ -130,9 +99,6 @@ void setVelocidad(int v);
 void Comando(char comando);
 void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*, AwsEventType, void*, uint8_t*, size_t);
 
-// ============================================================================
-// Máquina de estados del arranque (antes todo esto bloqueaba en setup())
-// ============================================================================
 enum EstadoSetup {
   ESPERANDO_BLE,
   PIDIENDO_SSID,
@@ -142,17 +108,15 @@ enum EstadoSetup {
 };
 EstadoSetup estado = ESPERANDO_BLE;
 
-#define TIEMPO_LINEA_BLE_MS 30000   // timeout por prompt BLE
-#define WIFI_TIMEOUT_MS      20000  // timeout de conexión WiFi
+#define TIEMPO_LINEA_BLE_MS 30000
+#define WIFI_TIMEOUT_MS      20000
 
 char ssid[64]     = { 0 };
 char password[64] = { 0 };
 char buffer[64];
 
-// Resultado del lector de línea BLE: distingue "sigo esperando" de "timeout".
 enum ResultadoLineaBLE { LINEA_WAITING, LINEA_COMPLETA, LINEA_TIMEOUT };
 
-// Lector de línea BLE no bloqueante (máquina interna con timeout).
 ResultadoLineaBLE leerLineaBLE(char* out, int maxLen, unsigned long timeoutMs) {
   static char buf[64];
   static int  idx = 0;
@@ -168,7 +132,7 @@ ResultadoLineaBLE leerLineaBLE(char* out, int maxLen, unsigned long timeoutMs) {
   while (bleAvailable()) {
     char c = (char)blePop();
     if (c == '\n' || c == '\r') {
-      if (idx == 0) continue;   // línea vacía: seguí esperando
+      if (idx == 0) continue;
       buf[idx] = '\0';
       activo = false;
       int n = idx;
@@ -299,22 +263,16 @@ unsigned long movimientoInicio = 0;
 const unsigned long TIEMPO_15CM     = 300;
 const unsigned long TIEMPO_90GRADOS = 300;
 
-// Comando de movimiento (F/B/L/R) cuyo ACK aún no se ha enviado:
-// se reporta hasta que el carro realmente termine de moverse.
 char comandoPendiente = 0;
 
-// Indica que la pinza está en camino y falta emitir su sonido de "terminado"
 bool pinzaSonidoPendiente = false;
 
-// Comando de pinza (O/C) cuyo ACK aún no se ha enviado: se reporta
-// hasta que el servo realmente termine de moverse (pinzaPos == pinzaTarget).
 char comandoPinzaPendiente = 0;
 
 void beep(int frecuencia, int duracionMs) {
   tone(BUZZER_PIN, frecuencia, duracionMs);
 }
 
-// Sonido característico al terminar de abrir/cerrar la pinza (distinto al de cámara)
 void beepPinzaLista() {
   beep(1200, 80); delay(90);
   beep(2400, 80);
@@ -341,8 +299,6 @@ void setup() {
   iniciarBLE();
 
   Serial.println("[setup] ESP32_CAR listo. Esperando conexión BLE...");
-  // OJO: setup() termina acá. El flujo de credenciales/WiFi lo maneja
-  // la máquina de estados en loop() -> manejarSetup(). Nada bloquea.
 }
 
 void loop() {
@@ -350,7 +306,6 @@ void loop() {
 
   manejarSetup();
 
-  // Enviar IP cada vez que el celular se conecta por BLE
   if (ipWiFi.length() > 0) {
     bool hayCliente = NimBLEDevice::getServer()->getConnectedCount() > 0;
     if (hayCliente && !ipEnviada) {
@@ -358,7 +313,7 @@ void loop() {
       blePrintPair("IP: ", ipWiFi.c_str());
       ipEnviada = true;
     }
-    if (!hayCliente) ipEnviada = false;  // resetear al desconectar
+    if (!hayCliente) ipEnviada = false;
   }
 
   if (pinzaPos != pinzaTarget) {
@@ -377,7 +332,6 @@ void loop() {
       pinzaSonidoPendiente = false;
     }
     if (pinzaPos == pinzaTarget && comandoPinzaPendiente != 0) {
-      // La pinza ya terminó de abrir/cerrar: ahora sí se reporta la ejecución
       ws.textAll("ACK:" + String(comandoPinzaPendiente));
       comandoPinzaPendiente = 0;
     }
@@ -392,7 +346,6 @@ void loop() {
     if (tiempoMov || tiempoGir) {
       detenerMotores();
       movimientoActual = QUIETO;
-      // El movimiento ya terminó: ahora sí se reporta la ejecución al receptor
       if (comandoPendiente != 0) {
         ws.textAll("ACK:" + String(comandoPendiente));
         comandoPendiente = 0;
@@ -413,35 +366,28 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       client->text("ERROR: Control ocupado");
     }
   } else if (type == WS_EVT_DISCONNECT) {
-    // El cliente de control se desconectó: detener el carro por seguridad
     if (client->id() == controlClientId) {
       detenerMotores();
       movimientoActual = QUIETO;
       controlAsignado  = false;
       controlClientId  = 0;
-      comandoPendiente = 0;      // ya no hay a quién reportarle
+      comandoPendiente = 0;
       comandoPinzaPendiente = 0;
     }
   } else if (type == WS_EVT_DATA) {
-    if (len == 0) return;        // frame vacío: nada que procesar
+    if (len == 0) return;
     if (client->id() == controlClientId) {
       char AA = (char)data[0];
       Comando(AA);
       if (AA == 'F' || AA == 'B' || AA == 'L' || AA == 'R') {
-        // El ACK se envía más adelante, desde loop(), cuando el carro
-        // realmente termine de moverse (no hay feedback del L298N/motores).
         comandoPendiente = AA;
       } else if (AA == 'O' || AA == 'C') {
         if (pinzaPos == pinzaTarget) {
-          // La pinza ya estaba en esa posición: no hay movimiento que esperar
           client->text("ACK:" + String(AA));
         } else {
-          // El ACK se envía más adelante, desde loop(), cuando la pinza
-          // realmente termine de abrir/cerrar (el SG90 no reporta posición).
           comandoPinzaPendiente = AA;
         }
       } else {
-        // Acciones instantáneas (cámara, liberar control): responde ya
         client->text("ACK:" + String(AA));
       }
     }
@@ -454,8 +400,8 @@ void Comando(char comando) {
     case 'B': setVelocidad(210); retroceder();     movimientoActual = RETROCEDIENDO_15; movimientoInicio = millis(); break;
     case 'L': setVelocidad(210); girarIzquierda(); movimientoActual = GIRANDO_IZQ;      movimientoInicio = millis(); break;
     case 'R': setVelocidad(210); girarDerecha();   movimientoActual = GIRANDO_DER;      movimientoInicio = millis(); break;
-    case 'N': digitalWrite(19, HIGH); break;   // ENCENDER CAMARA
-    case 'P': digitalWrite(19, LOW);  break;   // APAGAR CAMARA
+    case 'N': digitalWrite(19, HIGH); break;
+    case 'P': digitalWrite(19, LOW);  break;
     case 'O':
       if (pinzaPos != PINZA_ABIERTA_POS) { pinzaStart = pinzaPos; pinzaTarget = PINZA_ABIERTA_POS; pinzaSonidoPendiente = true; }
       break;

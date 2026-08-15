@@ -152,7 +152,7 @@ export function decodificarPrograma(numeroStr) {
 
     if (!Number.isInteger(numero) || numero < 1000 || numero > 9999) {
       errors.push(`Bloque ${blockIndex}: '${blockStr}' no es un número de 4 dígitos entre 1000 y 9999`);
-      bloques.push({ numero: blockStr, classification: 'INVALIDO', command: null, name: null });
+      bloques.push({ numero: blockStr, classification: 'INVALIDO', classifiedAs: 'INVALIDO', command: null, name: null });
       continue;
     }
 
