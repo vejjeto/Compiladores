@@ -270,6 +270,7 @@ bool pinzaSonidoPendiente = false;
 char comandoPinzaPendiente = 0;
 
 void beep(int frecuencia, int duracionMs) {
+  noTone(BUZZER_PIN);
   tone(BUZZER_PIN, frecuencia, duracionMs);
 }
 
@@ -422,6 +423,7 @@ void Comando(char comando) {
 }
 
 void setVelocidad(int v) {
+  v = constrain(v, 0, 255);
   analogWrite(ENA, v);
   analogWrite(ENB, v);
 }
