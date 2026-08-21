@@ -209,6 +209,27 @@ void manejarSetup() {
         ws.onEvent(onWsEvent);
         server.addHandler(&ws);
         server.begin();
+
+// Endpoints para cámara HTTP (accesible desde navegador/VLC)
+server.on("/poweron", HTTP_GET, [](AsyncWebServerRequest *request){
+  digitalWrite(19, HIGH);
+  request->send(200, "text/plain", "Cámara encendida");
+});
+
+server.on("/poweroff", HTTP_GET, [](AsyncWebServerRequest *request){
+  digitalWrite(19, LOW);
+  request->send(200, "text/plain", "Cámara apagada");
+});
+
+server.on("/stream", HTTP_GET, [](AsyncWebServerRequest *request){
+  String page = "<html><body><h1>Stream de Cámara ESP32</h1>";
+  page += "<p>IP cámara: 192.168.0.51</p>";
+  page += "<p>URL stream: http://192.168.0.51:80/stream</p>";
+  page += "<p>Conectar VLC: http://192.168.0.51:80</p>";
+  page += "</body></html>";
+  request->send(200, "text/html", page);
+});
+
         estado = LISTO;
         for (int i = 0; i < 3; i++) { beep(1000 + (i * 200), 100); delay(50); }
         Serial.print("[setup] LISTO, IP: "); Serial.println(ipWiFi);
@@ -239,6 +260,9 @@ uint32_t controlClientId = 0;
 #define ENB 17
 
 #define BUZZER_PIN      5
+#define CAMERA_IP      IPAddress(192, 168, 0, 51)
+#define CAMERA_GATEWAY IPAddress(192, 168, 0, 1)
+#define CAMERA_SUBNET  IPAddress(255, 255, 255, 0)
 #define SERVO_PINZA_PIN 26
 
 Servo servoPinza;
@@ -298,6 +322,9 @@ void setup() {
   servoPinza.write(pinzaPos);
 
   iniciarBLE();
+
+  // Configurar IP fija para cámara
+  WiFi.config(CAMERA_IP, CAMERA_GATEWAY, CAMERA_SUBNET);
 
   Serial.println("[setup] ESP32_CAR listo. Esperando conexión BLE...");
 }
@@ -362,7 +389,7 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       controlClientId = client->id();
       controlAsignado = true;
       beep(1000, 200);
-      client->text("Control asignado a tu IP");
+      client->text("Control asignado a tu IP. Cámara: http://192.168.0.51:80");
     } else if (client->id() != controlClientId) {
       client->text("ERROR: Control ocupado");
     }
@@ -401,7 +428,10 @@ void Comando(char comando) {
     case 'B': setVelocidad(210); retroceder();     movimientoActual = RETROCEDIENDO_15; movimientoInicio = millis(); break;
     case 'L': setVelocidad(210); girarIzquierda(); movimientoActual = GIRANDO_IZQ;      movimientoInicio = millis(); break;
     case 'R': setVelocidad(210); girarDerecha();   movimientoActual = GIRANDO_DER;      movimientoInicio = millis(); break;
-    case 'N': digitalWrite(19, HIGH); break;
+    case 'N':
+      digitalWrite(19, HIGH);
+      ws.textAll("CAM_STREAM:http://192.168.0.51:80/stream");
+      break;
     case 'P': digitalWrite(19, LOW);  break;
     case 'O':
       if (pinzaPos != PINZA_ABIERTA_POS) { pinzaStart = pinzaPos; pinzaTarget = PINZA_ABIERTA_POS; pinzaSonidoPendiente = true; }
