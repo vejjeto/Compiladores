@@ -1,5 +1,8 @@
 import { parseCommands } from '../core/parser.js';
 
+const CAMERA_IP = '192.168.0.51';
+const CAMERA_STREAM = `http://${CAMERA_IP}`;
+
 async function health(ctx) {
   return {
     ok: true,
@@ -7,7 +10,9 @@ async function health(ctx) {
     data: {
       status: 'ok',
       carConnected: ctx.carService.connected,
-      carAddress: ctx.carService.address
+      carAddress: ctx.carService.address,
+      cameraAddress: CAMERA_IP,
+      cameraStream: CAMERA_STREAM
     },
     error: null
   };
@@ -176,6 +181,54 @@ async function audit(ctx) {
   };
 }
 
+async function connectPeer(ctx, body) {
+  const { url } = body;
+
+  if (!url) {
+    return {
+      ok: false,
+      status: 400,
+      data: { ok: false, error: 'La URL del peer es obligatoria (ej: ws://192.168.0.51:3000/ws/peer)' },
+      error: 'La URL del peer es obligatoria'
+    };
+  }
+
+  try {
+    const result = await ctx.peerAdapter.connect(url);
+    return { ok: true, status: 200, data: result, error: null };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 502,
+      data: { ok: false, error: err.message },
+      error: err.message
+    };
+  }
+}
+
+async function disconnectPeer(ctx) {
+  ctx.peerAdapter.disconnect();
+  return {
+    ok: true,
+    status: 200,
+    data: { ok: true, status: 'disconnected' },
+    error: null
+  };
+}
+
+async function peerStatus(ctx) {
+  return {
+    ok: true,
+    status: 200,
+    data: {
+      connected: ctx.peerAdapter.connected,
+      role: ctx.peerAdapter.role,
+      address: ctx.peerAdapter.address
+    },
+    error: null
+  };
+}
+
 export const HANDLERS = {
   health,
   rangos,
@@ -187,5 +240,8 @@ export const HANDLERS = {
   command,
   raw,
   classify,
-  audit
+  audit,
+  'connect-peer': connectPeer,
+  'disconnect-peer': disconnectPeer,
+  'peer-status': peerStatus
 };

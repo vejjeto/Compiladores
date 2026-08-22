@@ -16,8 +16,19 @@ class TransmitterView {
     this.videoPlaceholder = document.getElementById('tx-video-placeholder');
     this.videoOverlay = document.getElementById('tx-video-overlay');
     this.videoPlayer = document.getElementById('tx-video-player');
+    this.pcIpDisplay = document.getElementById('tx-pc-ip');
+
+    this.cameraOnBtn = document.getElementById('tx-camera-on-btn');
+    this.cameraOffBtn = document.getElementById('tx-camera-off-btn');
+    this.cameraStatus = document.getElementById('tx-camera-status');
+
+    this.peerUrlInput = document.getElementById('tx-peer-url');
+    this.peerConnectBtn = document.getElementById('tx-peer-connect-btn');
+    this.peerDisconnectBtn = document.getElementById('tx-peer-disconnect-btn');
+    this.peerStatus = document.getElementById('tx-peer-status');
 
     this.videoActive = false;
+    this.cameraActive = false;
 
     this.bindEvents();
     this.connectBackend();
@@ -27,6 +38,12 @@ class TransmitterView {
     this.executeBtn.addEventListener('click', () => this.executeProgram());
     this.clearBtn.addEventListener('click', () => this.clearInput());
     this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
+
+    this.cameraOnBtn.addEventListener('click', () => this.cameraOn());
+    this.cameraOffBtn.addEventListener('click', () => this.cameraOff());
+
+    this.peerConnectBtn.addEventListener('click', () => this.connectPeer());
+    this.peerDisconnectBtn.addEventListener('click', () => this.disconnectPeer());
 
     this.commandInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -74,6 +91,25 @@ class TransmitterView {
       if (data.sequenceId !== this.activeSequenceId) return;
       this.addLog(`Error de secuencia en paso ${data.step}: ${data.message}`, 'invalid');
       this.pendingSteps = [];
+    } else if (type === 'CAR_MESSAGE') {
+      // Manejar mensajes del carro (PC_IP, CAMERA_IP, etc.)
+      this._handleCarMessage(data.message);
+    }
+  }
+
+  _handleCarMessage(message) {
+    // Manejar IP del PC
+    if (message.startsWith('PC_IP:')) {
+      const pcIP = message.substring(6);
+      if (this.pcIpDisplay) {
+        this.pcIpDisplay.textContent = 'PC: ' + pcIP;
+      }
+      this.addLog(`IP del PC detectada: ${pcIP}`, 'info');
+    }
+    // Manejar IP de cámara
+    else if (message.startsWith('CAMERA_IP:')) {
+      const camIP = message.substring(10);
+      this.addLog(`IP de cámara: ${camIP}`, 'info');
     }
   }
 
@@ -156,15 +192,63 @@ class TransmitterView {
       this.addLog(`Secuencia ESP32: [${res.data.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
       this.addLog(`Línea de comandos (dígitos): ${res.data.decoded.map(d => d.numero).join(', ')}`, 'command');
       this.addLog('Esperando confirmaciones OK_*...', 'info');
-
-      if (res.data.decoded.some(c => c.command === 'N') && !this.videoActive) {
-        this.startVideo();
-      }
-      if (res.data.decoded.some(c => c.command === 'P') && this.videoActive) {
-        this.stopVideo();
-      }
     } catch (err) {
       this.addLog(`No se pudo contactar al backend (${this.client.baseUrl}): ${err.message}`, 'invalid');
+    }
+  }
+
+  async cameraOn() {
+    if (this.cameraActive) return;
+
+    if (!this.client.transport) {
+      this.addLog('No hay conexión con el backend', 'invalid');
+      return;
+    }
+
+    try {
+      const healthRes = await this.client.request('health');
+      if (!healthRes.ok || !healthRes.data?.carConnected) {
+        this.addLog('No hay conexión con el carro. Conectá primero desde el panel Receptor.', 'invalid');
+        return;
+      }
+
+      const res = await this.client.request('command', { command: 'N' });
+      if (res.ok) {
+        this.cameraActive = true;
+        this.cameraStatus.textContent = 'Encendida';
+        this.cameraStatus.className = 'camera-status camera-on';
+        this.cameraOnBtn.disabled = true;
+        this.cameraOffBtn.disabled = false;
+        this.addLog(`Cámara encendida — N°${res.data.esp32Char} encriptado`, 'valid');
+        this.startVideo();
+      } else {
+        const errorMsg = res.data?.error || res.error || 'desconocido';
+        this.addLog(`Error encendiendo cámara: ${errorMsg}`, 'invalid');
+      }
+    } catch (err) {
+      this.addLog(`Error de conexión: ${err.message}`, 'invalid');
+    }
+  }
+
+  async cameraOff() {
+    if (!this.cameraActive) return;
+
+    try {
+      const res = await this.client.request('command', { command: 'P' });
+      if (res.ok) {
+        this.cameraActive = false;
+        this.cameraStatus.textContent = 'Apagada';
+        this.cameraStatus.className = 'camera-status';
+        this.cameraOnBtn.disabled = false;
+        this.cameraOffBtn.disabled = true;
+        this.stopVideo();
+        this.addLog(`Cámara apagada — N°${res.data.esp32Char} encriptado`, 'warn');
+      } else {
+        const errorMsg = res.data?.error || res.error || 'desconocido';
+        this.addLog(`Error apagando cámara: ${errorMsg}`, 'invalid');
+      }
+    } catch (err) {
+      this.addLog(`Error de conexión: ${err.message}`, 'invalid');
     }
   }
 
@@ -178,23 +262,33 @@ class TransmitterView {
       const res = await this.client.request('health');
       const health = res.data;
 
-      if (health.carAddress && this.videoPlayer) {
-        this.videoPlayer.src = `http://${health.carAddress}/mjpeg`;
-        this.addLog(`Stream MJPEG: http://${health.carAddress}/mjpeg`, 'info');
+      if (health.cameraStream && this.videoPlayer) {
+        this.videoPlayer.src = health.cameraStream;
+        this.videoPlayer.style.display = 'block';
+        this.addLog(`Stream MJPEG: ${health.cameraStream}`, 'info');
+      } else if (health.carAddress && this.videoPlayer) {
+        const streamUrl = `http://${health.carAddress}`;
+        this.videoPlayer.src = streamUrl;
+        this.videoPlayer.style.display = 'block';
+        this.addLog(`Stream MJPEG: ${streamUrl}`, 'info');
       } else {
         if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
-        this.addLog('Carro no conectado. Hardware real usa RTSP: rtsp://<ip_carro>:8554/stream', 'warn');
+        this.addLog('No se pudo obtener la URL del stream', 'warn');
       }
     } catch {
       if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
+      this.addLog('Error obteniendo URL del stream', 'warn');
     }
   }
 
   stopVideo() {
-    this.videoPlaceholder.classList.remove('hidden');
-    this.videoOverlay.classList.add('hidden');
+    if (this.videoPlaceholder) this.videoPlaceholder.classList.remove('hidden');
+    if (this.videoOverlay) this.videoOverlay.classList.add('hidden');
     this.videoActive = false;
-    if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
+    if (this.videoPlayer) {
+      this.videoPlayer.removeAttribute('src');
+      this.videoPlayer.style.display = 'none';
+    }
     this.addLog('Cámara apagada (P)', 'warn');
   }
 
@@ -214,6 +308,51 @@ class TransmitterView {
       this.logConsole.removeChild(this.logConsole.firstChild);
     }
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
+  }
+
+  async connectPeer() {
+    const url = this.peerUrlInput.value.trim();
+    if (!url) {
+      this.addLog('Ingresá la URL del peer (ej: ws://192.168.0.XX:3000/ws/peer)', 'invalid');
+      return;
+    }
+
+    this.addLog(`Conectando al peer: ${url}`, 'info');
+    this.peerConnectBtn.disabled = true;
+
+    try {
+      const res = await this.client.request('connect-peer', { url });
+      if (res.ok) {
+        this.peerStatus.textContent = `Conectado a ${res.data.address}`;
+        this.peerStatus.className = 'peer-status peer-connected';
+        this.peerConnectBtn.disabled = true;
+        this.peerDisconnectBtn.disabled = false;
+        this.addLog(`Peer conectado: ${res.data.address}`, 'valid');
+      } else {
+        this.peerStatus.textContent = 'Error de conexión';
+        this.peerStatus.className = 'peer-status peer-error';
+        this.peerConnectBtn.disabled = false;
+        this.addLog(`Error conectando peer: ${res.data?.error || res.error}`, 'invalid');
+      }
+    } catch (err) {
+      this.peerStatus.textContent = 'Error de conexión';
+      this.peerStatus.className = 'peer-status peer-error';
+      this.peerConnectBtn.disabled = false;
+      this.addLog(`Error de conexión: ${err.message}`, 'invalid');
+    }
+  }
+
+  async disconnectPeer() {
+    try {
+      await this.client.request('disconnect-peer');
+      this.peerStatus.textContent = 'Sin conexión peer';
+      this.peerStatus.className = 'peer-status';
+      this.peerConnectBtn.disabled = false;
+      this.peerDisconnectBtn.disabled = true;
+      this.addLog('Peer desconectado', 'warn');
+    } catch (err) {
+      this.addLog(`Error desconectando peer: ${err.message}`, 'invalid');
+    }
   }
 
   clearInput() {

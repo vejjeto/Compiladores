@@ -10,6 +10,7 @@ import * as encriptador from './src/core/encriptador.js';
 import { COMMAND_MAP, MOVEMENT_COMMANDS } from './src/core/parser.js';
 import { HANDLERS } from './src/http/handlers.js';
 import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
+import { PeerAdapter } from './src/adapters/peerAdapter.js';
 
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 3000;
@@ -60,6 +61,7 @@ export function createApp(options = {}) {
     ackTimeout: options.ackTimeout,
     maxRetries: options.maxRetries
   });
+  const peerAdapter = new PeerAdapter({ ctx: { carService, auditService, transmisorService } });
 
   carService.on('status', ({ status, ip, port }) => {
     auditService.broadcast('CAR_STATUS', {
@@ -77,7 +79,7 @@ export function createApp(options = {}) {
     });
   });
 
-  const ctx = { carService, auditService, transmisorService, encriptador };
+  const ctx = { carService, auditService, transmisorService, encriptador, peerAdapter };
 
   const httpServer = http.createServer((req, res) => {
     handleRequest(req, res, ctx);
@@ -174,6 +176,10 @@ async function handleRequest(req, res, ctx) {
       return respondResult(res, await HANDLERS.health(ctx, {}));
     }
 
+    if (method === 'GET' && path === '/api/peer-status') {
+      return respondResult(res, await HANDLERS['peer-status'](ctx, {}));
+    }
+
     if (method === 'GET' && path === '/api/audit') {
       return respondResult(res, await HANDLERS.audit(ctx, {}));
     }
@@ -220,7 +226,10 @@ async function handleRequest(req, res, ctx) {
         '/api/programa-numeros': HANDLERS['programa-numeros'],
         '/api/command': HANDLERS.command,
         '/api/raw': HANDLERS.raw,
-        '/api/classify': HANDLERS.classify
+        '/api/classify': HANDLERS.classify,
+        '/api/connect-peer': HANDLERS['connect-peer'],
+        '/api/disconnect-peer': HANDLERS['disconnect-peer'],
+        '/api/peer-status': HANDLERS['peer-status']
       };
 
       const handler = routeHandlers[path];

@@ -224,8 +224,8 @@ server.on("/poweroff", HTTP_GET, [](AsyncWebServerRequest *request){
 server.on("/stream", HTTP_GET, [](AsyncWebServerRequest *request){
   String page = "<html><body><h1>Stream de Cámara ESP32</h1>";
   page += "<p>IP cámara: 192.168.0.51</p>";
-  page += "<p>URL stream: http://192.168.0.51:80/stream</p>";
-  page += "<p>Conectar VLC: http://192.168.0.51:80</p>";
+  page += "<p>URL stream: http://192.168.0.51</p>";
+  page += "<p>Conectar VLC: http://192.168.0.51</p>";
   page += "</body></html>";
   request->send(200, "text/html", page);
 });
@@ -389,7 +389,9 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       controlClientId = client->id();
       controlAsignado = true;
       beep(1000, 200);
-      client->text("Control asignado a tu IP. Cámara: http://192.168.0.51:80");
+      // Enviar IP del PC que se conectó
+      client->text("PC_IP:" + client->remoteIP().toString());
+      client->text("Control asignado a tu IP. Cámara: http://192.168.0.51");
     } else if (client->id() != controlClientId) {
       client->text("ERROR: Control ocupado");
     }
@@ -430,7 +432,7 @@ void Comando(char comando) {
     case 'R': setVelocidad(210); girarDerecha();   movimientoActual = GIRANDO_DER;      movimientoInicio = millis(); break;
     case 'N':
       digitalWrite(19, HIGH);
-      ws.textAll("CAM_STREAM:http://192.168.0.51:80/stream");
+      ws.textAll("CAM_STREAM:http://192.168.0.51");
       break;
     case 'P': digitalWrite(19, LOW);  break;
     case 'O':
@@ -440,6 +442,9 @@ void Comando(char comando) {
       if (pinzaPos != PINZA_CERRADA_POS) { pinzaStart = pinzaPos; pinzaTarget = PINZA_CERRADA_POS; pinzaSonidoPendiente = true; }
       break;
     case 'M':
+      detenerMotores();
+      comandoPendiente = 0;
+      comandoPinzaPendiente = 0;
       controlAsignado = false;
       controlClientId = 0;
       beep(500, 500);

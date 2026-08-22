@@ -564,6 +564,104 @@ textarea.form-input {
   50% { opacity: 0.3; }
 }
 
+.pc-ip-display {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-mid);
+  color: var(--phosphor);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--screen-panel);
+  margin-left: var(--space-2);
+}
+
+.peer-section {
+  padding: var(--space-3) var(--space-4);
+  background: var(--screen-panel);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.peer-section label {
+  color: var(--phosphor);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+.peer-status {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+  margin-top: var(--space-2);
+}
+
+.peer-status.peer-connected {
+  color: var(--phosphor);
+  text-shadow: 0 0 6px var(--phosphor-glow);
+}
+
+.peer-status.peer-error {
+  color: var(--danger);
+}
+
+.camera-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--screen-panel);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.camera-controls label {
+  color: var(--phosphor);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.camera-status {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+}
+
+.camera-status.camera-on {
+  color: var(--phosphor);
+  text-shadow: 0 0 6px var(--phosphor-glow);
+}
+
+.btn-success {
+  background: rgba(51, 255, 136, 0.15);
+  color: var(--phosphor);
+  border: 1px solid rgba(51, 255, 136, 0.3);
+}
+
+.btn-success:hover {
+  background: rgba(51, 255, 136, 0.25);
+}
+
+.btn-success:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .video-container {
   width: 100%;
   aspect-ratio: 16 / 9;

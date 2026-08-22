@@ -43,8 +43,24 @@
           <span class="status-dot status-disconnected"></span>
           <span>Desconectado</span>
         </div>
+        <div class="pc-ip-display" id="tx-pc-ip">PC: ---</div>
       </div>
       <div class="panel-body">
+        <div class="peer-section">
+          <label>Conexión Peer (otro backend)</label>
+          <div class="btn-group">
+            <input
+              type="text"
+              class="form-input"
+              id="tx-peer-url"
+              placeholder="ws://192.168.0.XX:3000/ws/peer"
+              spellcheck="false"
+            >
+            <button class="btn btn-primary" id="tx-peer-connect-btn">Conectar Peer</button>
+            <button class="btn btn-danger" id="tx-peer-disconnect-btn" disabled>Desconectar</button>
+          </div>
+          <div class="peer-status" id="tx-peer-status">Sin conexión peer</div>
+        </div>
         <div class="form-group">
           <label>Programa de comandos</label>
           <textarea
@@ -61,16 +77,25 @@
         <div class="cmd-reference">
           <div class="cmd-legend">
             <div class="cmd-row"><b>F</b>:<b>n</b> Avanzar &middot; <b>B</b>:<b>n</b> Retroceder &middot; <b>R</b>:<b>n</b> Girar Derecha &middot; <b>L</b>:<b>n</b> Girar Izquierda</div>
-            <div class="cmd-row"><b>O</b> Abrir Pinza &middot; <b>C</b> Cerrar Pinza &middot; <b>N</b> Encender C&aacute;mara &middot; <b>P</b> Apagar C&aacute;mara &middot; <b>M</b> Liberar Control</div>
-            <div class="cmd-row"><b>N</b> al inicio &middot; <b>P</b> al final &middot; <b>n</b> = 1-9 &middot; O/C/N/P/M sin :n</div>
+            <div class="cmd-row"><b>O</b> Abrir Pinza &middot; <b>C</b> Cerrar Pinza &middot; <b>M</b> Liberar Control</div>
+            <div class="cmd-row">Cámara: usar botones de arriba &middot; <b>P</b> se agrega al final automáticamente</div>
           </div>
+        </div>
+
+        <div class="camera-controls" id="tx-camera-controls">
+          <label>Cámara</label>
+          <div class="btn-group">
+            <button class="btn btn-success" id="tx-camera-on-btn">Encender</button>
+            <button class="btn btn-danger" id="tx-camera-off-btn">Apagar</button>
+          </div>
+          <span class="camera-status" id="tx-camera-status">Apagada</span>
         </div>
 
         <div class="video-container" id="tx-video-container">
           <img id="tx-video-player" alt="Stream de cámara">
           <div class="video-placeholder" id="tx-video-placeholder">
             <span class="icon">&#9655;</span>
-            <span>Esperando comando N para iniciar stream</span>
+            <span>Presioná "Encender" para iniciar stream</span>
           </div>
           <div class="video-overlay hidden" id="tx-video-overlay">LIVE</div>
         </div>
@@ -96,8 +121,24 @@
           <span class="status-dot status-disconnected"></span>
           <span>Carro Desconectado</span>
         </div>
+        <div class="pc-ip-display" id="rx-pc-ip">PC: ---</div>
       </div>
       <div class="panel-body">
+        <div class="peer-section">
+          <label>Conexión Peer (otro backend)</label>
+          <div class="btn-group">
+            <input
+              type="text"
+              class="form-input"
+              id="rx-peer-url"
+              placeholder="ws://192.168.0.XX:3000/ws/peer"
+              spellcheck="false"
+            >
+            <button class="btn btn-primary" id="rx-peer-connect-btn">Conectar Peer</button>
+            <button class="btn btn-danger" id="rx-peer-disconnect-btn" disabled>Desconectar</button>
+          </div>
+          <div class="peer-status" id="rx-peer-status">Sin conexión peer</div>
+        </div>
         <div class="form-group">
           <label>URL WebSocket del carro</label>
           <input

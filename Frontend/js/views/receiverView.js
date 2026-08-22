@@ -15,6 +15,12 @@ class ReceiverView {
     this.clearLogsBtn = document.getElementById('rx-clear-logs-btn');
     this.verifyInput = document.getElementById('rx-verify-input');
     this.verifyBtn = document.getElementById('rx-verify-btn');
+    this.pcIpDisplay = document.getElementById('rx-pc-ip');
+
+    this.peerUrlInput = document.getElementById('rx-peer-url');
+    this.peerConnectBtn = document.getElementById('rx-peer-connect-btn');
+    this.peerDisconnectBtn = document.getElementById('rx-peer-disconnect-btn');
+    this.peerStatus = document.getElementById('rx-peer-status');
 
     this.PRIMES = [41, 43, 47, 53, 59, 61];
     this.currentLine = [];
@@ -36,6 +42,13 @@ class ReceiverView {
 
     if (this.verifyBtn) {
       this.verifyBtn.addEventListener('click', () => this.verifyNumber());
+    }
+
+    if (this.peerConnectBtn) {
+      this.peerConnectBtn.addEventListener('click', () => this.connectPeer());
+    }
+    if (this.peerDisconnectBtn) {
+      this.peerDisconnectBtn.addEventListener('click', () => this.disconnectPeer());
     }
   }
 
@@ -63,7 +76,27 @@ class ReceiverView {
     } else if (type === 'CAR_STATUS') {
       this.handleCarStatus(data);
     } else if (type === 'CAR_MESSAGE') {
-      this.addAuditLog(`Carro: ${data.message}`, 'info');
+      this._handleCarMessage(data.message);
+    }
+  }
+
+  _handleCarMessage(message) {
+    // Manejar IP del PC
+    if (message.startsWith('PC_IP:')) {
+      const pcIP = message.substring(6);
+      if (this.pcIpDisplay) {
+        this.pcIpDisplay.textContent = 'PC: ' + pcIP;
+      }
+      this.addAuditLog(`IP del PC detectada: ${pcIP}`, 'info');
+    }
+    // Manejar IP de cámara
+    else if (message.startsWith('CAMERA_IP:')) {
+      const camIP = message.substring(10);
+      this.addAuditLog(`IP de cámara: ${camIP}`, 'info');
+    }
+    // Otros mensajes
+    else {
+      this.addAuditLog(`Carro: ${message}`, 'info');
     }
   }
 
@@ -330,6 +363,51 @@ class ReceiverView {
       this.logConsole.removeChild(this.logConsole.firstChild);
     }
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
+  }
+
+  async connectPeer() {
+    const url = this.peerUrlInput.value.trim();
+    if (!url) {
+      this.addAuditLog('Ingresá la URL del peer (ej: ws://192.168.0.XX:3000/ws/peer)', 'invalid');
+      return;
+    }
+
+    this.addAuditLog(`Conectando al peer: ${url}`, 'info');
+    this.peerConnectBtn.disabled = true;
+
+    try {
+      const res = await this.client.request('connect-peer', { url });
+      if (res.ok) {
+        this.peerStatus.textContent = `Conectado a ${res.data.address}`;
+        this.peerStatus.className = 'peer-status peer-connected';
+        this.peerConnectBtn.disabled = true;
+        this.peerDisconnectBtn.disabled = false;
+        this.addAuditLog(`Peer conectado: ${res.data.address}`, 'valid');
+      } else {
+        this.peerStatus.textContent = 'Error de conexión';
+        this.peerStatus.className = 'peer-status peer-error';
+        this.peerConnectBtn.disabled = false;
+        this.addAuditLog(`Error conectando peer: ${res.data?.error || res.error}`, 'invalid');
+      }
+    } catch (err) {
+      this.peerStatus.textContent = 'Error de conexión';
+      this.peerStatus.className = 'peer-status peer-error';
+      this.peerConnectBtn.disabled = false;
+      this.addAuditLog(`Error de conexión: ${err.message}`, 'invalid');
+    }
+  }
+
+  async disconnectPeer() {
+    try {
+      await this.client.request('disconnect-peer');
+      this.peerStatus.textContent = 'Sin conexión peer';
+      this.peerStatus.className = 'peer-status';
+      this.peerConnectBtn.disabled = false;
+      this.peerDisconnectBtn.disabled = true;
+      this.addAuditLog('Peer desconectado', 'warn');
+    } catch (err) {
+      this.addAuditLog(`Error desconectando peer: ${err.message}`, 'invalid');
+    }
   }
 
   clearLogs() {
