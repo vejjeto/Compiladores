@@ -144,17 +144,20 @@ class TransmitterView {
       return;
     }
 
-    // If program starts with N, connect car first via peer
+    // If program starts with N, connect car first
     if (program.trim().toUpperCase().startsWith('N')) {
+      let peerConnected = false;
       try {
         const peerRes = await this.client.request('peer-status');
-        if (peerRes.ok && peerRes.data?.connected) {
-          this.addLog('Programa inicia con N — pidiendo conexión de carro al receptor...', 'info');
+        peerConnected = peerRes.ok && peerRes.data?.connected;
+      } catch { /* no peer */ }
+
+      if (peerConnected) {
+        this.addLog('Programa inicia con N — pidiendo conexión de carro al receptor...', 'info');
+        try {
           await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
           await new Promise(r => setTimeout(r, 1500));
-        }
-      } catch {
-        // Peer not connected, continue anyway
+        } catch { /* ignore */ }
       }
     }
 
@@ -220,31 +223,39 @@ class TransmitterView {
     }
 
     // Check if peer is connected
+    let peerConnected = false;
     try {
       const peerRes = await this.client.request('peer-status');
-      if (!peerRes.ok || !peerRes.data?.connected) {
-        this.addLog('No hay conexión con el peer. Conectá el peer primero.', 'invalid');
-        return;
-      }
-    } catch {
-      this.addLog('No se pudo verificar el estado del peer', 'invalid');
-      return;
-    }
+      peerConnected = peerRes.ok && peerRes.data?.connected;
+    } catch { /* no peer */ }
 
-    // Tell receiver to connect to car
-    this.addLog('Pidiendo al receptor que conecte el carro...', 'info');
-    try {
-      const connectRes = await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
-      if (!connectRes.ok) {
-        this.addLog(`Error: ${connectRes.data?.error || connectRes.error}`, 'invalid');
+    if (peerConnected) {
+      // Peer mode: tell receiver to connect to car first
+      this.addLog('Pidiendo al receptor que conecte el carro...', 'info');
+      try {
+        const connectRes = await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
+        if (!connectRes.ok) {
+          this.addLog(`Error: ${connectRes.data?.error || connectRes.error}`, 'invalid');
+          return;
+        }
+        this.addLog('Receptor conectando al carro (192.168.0.50)...', 'info');
+        await new Promise(r => setTimeout(r, 1500));
+      } catch (err) {
+        this.addLog(`Error: ${err.message}`, 'invalid');
         return;
       }
-      this.addLog('Receptor conectando al carro (192.168.0.50)...', 'info');
-      // Wait a moment for the receiver to connect
-      await new Promise(r => setTimeout(r, 1500));
-    } catch (err) {
-      this.addLog(`Error: ${err.message}`, 'invalid');
-      return;
+    } else {
+      // Direct mode: check if car is connected
+      try {
+        const healthRes = await this.client.request('health');
+        if (!healthRes.ok || !healthRes.data?.carConnected) {
+          this.addLog('No hay conexión con el carro ni con el peer. Conectá el carro primero.', 'invalid');
+          return;
+        }
+      } catch {
+        this.addLog('No se pudo verificar el estado del carro', 'invalid');
+        return;
+      }
     }
 
     // Send camera ON command
