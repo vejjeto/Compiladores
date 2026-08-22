@@ -144,6 +144,20 @@ class TransmitterView {
       return;
     }
 
+    // If program starts with N, connect car first via peer
+    if (program.trim().toUpperCase().startsWith('N')) {
+      try {
+        const peerRes = await this.client.request('peer-status');
+        if (peerRes.ok && peerRes.data?.connected) {
+          this.addLog('Programa inicia con N — pidiendo conexión de carro al receptor...', 'info');
+          await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } catch {
+        // Peer not connected, continue anyway
+      }
+    }
+
     let numeroUnico;
 
     try {
@@ -205,13 +219,36 @@ class TransmitterView {
       return;
     }
 
+    // Check if peer is connected
     try {
-      const healthRes = await this.client.request('health');
-      if (!healthRes.ok || !healthRes.data?.carConnected) {
-        this.addLog('No hay conexión con el carro. Conectá primero desde el panel Receptor.', 'invalid');
+      const peerRes = await this.client.request('peer-status');
+      if (!peerRes.ok || !peerRes.data?.connected) {
+        this.addLog('No hay conexión con el peer. Conectá el peer primero.', 'invalid');
         return;
       }
+    } catch {
+      this.addLog('No se pudo verificar el estado del peer', 'invalid');
+      return;
+    }
 
+    // Tell receiver to connect to car
+    this.addLog('Pidiendo al receptor que conecte el carro...', 'info');
+    try {
+      const connectRes = await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
+      if (!connectRes.ok) {
+        this.addLog(`Error: ${connectRes.data?.error || connectRes.error}`, 'invalid');
+        return;
+      }
+      this.addLog('Receptor conectando al carro (192.168.0.50)...', 'info');
+      // Wait a moment for the receiver to connect
+      await new Promise(r => setTimeout(r, 1500));
+    } catch (err) {
+      this.addLog(`Error: ${err.message}`, 'invalid');
+      return;
+    }
+
+    // Send camera ON command
+    try {
       const res = await this.client.request('command', { command: 'N' });
       if (res.ok) {
         this.cameraActive = true;
@@ -219,7 +256,7 @@ class TransmitterView {
         this.cameraStatus.className = 'camera-status camera-on';
         this.cameraOnBtn.disabled = true;
         this.cameraOffBtn.disabled = false;
-        this.addLog(`Cámara encendida — N°${res.data.esp32Char} encriptado`, 'valid');
+        this.addLog('Cámara encendida', 'valid');
         this.startVideo();
       } else {
         const errorMsg = res.data?.error || res.error || 'desconocido';
@@ -317,8 +354,19 @@ class TransmitterView {
       return;
     }
 
+    // Validate URL format
+    if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+      this.addLog('URL inválida. Debe empezar con ws:// o wss://', 'invalid');
+      return;
+    }
+    if (!url.includes('/ws/peer')) {
+      this.addLog('URL inválida. Debe terminar en /ws/peer (ej: ws://IP:3000/ws/peer)', 'invalid');
+      return;
+    }
+
     this.addLog(`Conectando al peer: ${url}`, 'info');
     this.peerConnectBtn.disabled = true;
+    this.peerStatus.textContent = 'Conectando...';
 
     try {
       const res = await this.client.request('connect-peer', { url });
@@ -329,16 +377,23 @@ class TransmitterView {
         this.peerDisconnectBtn.disabled = false;
         this.addLog(`Peer conectado: ${res.data.address}`, 'valid');
       } else {
+        const errorMsg = res.data?.error || res.error || 'Error desconocido';
         this.peerStatus.textContent = 'Error de conexión';
         this.peerStatus.className = 'peer-status peer-error';
         this.peerConnectBtn.disabled = false;
-        this.addLog(`Error conectando peer: ${res.data?.error || res.error}`, 'invalid');
+        this.addLog(`Error conectando peer: ${errorMsg}`, 'invalid');
       }
     } catch (err) {
       this.peerStatus.textContent = 'Error de conexión';
       this.peerStatus.className = 'peer-status peer-error';
       this.peerConnectBtn.disabled = false;
-      this.addLog(`Error de conexión: ${err.message}`, 'invalid');
+      if (err.message === 'Timeout') {
+        this.addLog('Timeout: tu backend no respondió. Verificá que esté corriendo en localhost:3000', 'invalid');
+      } else if (err.message === 'WS no disponible') {
+        this.addLog('Tu backend no está conectado. Recargá la página (F5) y verificá que el backend esté corriendo', 'invalid');
+      } else {
+        this.addLog(`Error de conexión: ${err.message}`, 'invalid');
+      }
     }
   }
 

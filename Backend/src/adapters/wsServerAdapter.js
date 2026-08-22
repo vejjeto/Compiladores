@@ -10,6 +10,8 @@ import {
 import { HANDLERS } from '../http/handlers.js';
 
 const HEARTBEAT_MS = 30000;
+const DEFAULT_CAR_IP = '192.168.0.50';
+const DEFAULT_CAR_PORT = 80;
 const COMPONENT = 'WS-API';
 
 export class WsServerAdapter {
@@ -187,7 +189,7 @@ export class WsServerAdapter {
     this.peerConnections.add(ws);
 
     // Forward car events to this peer
-    const unsub = this.ctx.auditService.subscribe(({ type, data }) => {
+    const unsubAudit = this.ctx.auditService.subscribe(({ type, data }) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'event', event: type, data }));
       }
@@ -205,12 +207,32 @@ export class WsServerAdapter {
       let msg;
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
+      if (msg.type === 'connect-car') {
+        // Transmitter asks receiver to connect to the car
+        const carIp = msg.ip || DEFAULT_CAR_IP;
+        const carPort = msg.port || DEFAULT_CAR_PORT;
+        this.logger.info(COMPONENT, `Peer pide conectar al carro: ${carIp}:${carPort}`);
+
+        if (this.ctx.carService.connected) {
+          ws.send(JSON.stringify({ type: 'connect-car-result', ok: true, message: 'Carro ya conectado' }));
+          return;
+        }
+
+        try {
+          await this.ctx.carService.connect(carIp, carPort);
+          ws.send(JSON.stringify({ type: 'connect-car-result', ok: true, message: `Carro conectado en ${carIp}:${carPort}` }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: 'connect-car-result', ok: false, error: err.message }));
+        }
+        return;
+      }
+
       if (msg.type === 'command') {
         // Remote peer sends a command → execute locally against car
         this.logger.info(COMPONENT, `Comando remoto del peer: '${msg.command}'`);
 
         if (!this.ctx.carService.connected) {
-          ws.send(JSON.stringify({ type: 'car-status', connected: false }));
+          ws.send(JSON.stringify({ type: 'command-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
           return;
         }
 
@@ -226,13 +248,15 @@ export class WsServerAdapter {
 
     ws.on('close', () => {
       this.peerConnections.delete(ws);
-      this.ctx.carService.off('message', onCarMessage);
-      unsub();
+      this.ctx.carService.removeListener('message', onCarMessage);
+      unsubAudit();
       this.logger.info(COMPONENT, `Peer desconectado: ${clientIp}`);
     });
 
     ws.on('error', () => {
       this.peerConnections.delete(ws);
+      this.ctx.carService.removeListener('message', onCarMessage);
+      unsubAudit();
     });
   }
 }

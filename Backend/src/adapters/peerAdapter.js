@@ -104,6 +104,13 @@ export class PeerAdapter {
     this.ws.send(JSON.stringify({ type: 'command', command }));
   }
 
+  sendConnectCar(ip, port) {
+    if (!this.connected) {
+      throw new Error('No hay conexión con el peer');
+    }
+    this.ws.send(JSON.stringify({ type: 'connect-car', ip, port }));
+  }
+
   sendEvent(event, data) {
     if (!this.connected) return;
     this.ws.send(JSON.stringify({ type: 'event', event, data }));
@@ -136,19 +143,18 @@ export class PeerAdapter {
 
     switch (msg.type) {
       case 'command':
-        // Peer sends a command → execute against local car
         this._handleRemoteCommand(msg.command);
         break;
+      case 'connect-car-result':
+        this._notifyListeners({ type: 'connect-car-result', ok: msg.ok, message: msg.message, error: msg.error });
+        break;
       case 'event':
-        // Peer sends an event → forward to local listeners
         this._notifyListeners({ type: 'peer-event', event: msg.event, data: msg.data });
         break;
       case 'car-message':
-        // Peer forwards car message → forward to local listeners
         this._notifyListeners({ type: 'peer-car-message', message: msg.message });
         break;
       case 'car-status':
-        // Peer forwards car status → forward to local listeners
         this._notifyListeners({ type: 'peer-car-status', status: msg.status });
         break;
     }

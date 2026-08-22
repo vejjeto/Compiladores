@@ -229,7 +229,8 @@ async function handleRequest(req, res, ctx) {
         '/api/classify': HANDLERS.classify,
         '/api/connect-peer': HANDLERS['connect-peer'],
         '/api/disconnect-peer': HANDLERS['disconnect-peer'],
-        '/api/peer-status': HANDLERS['peer-status']
+        '/api/peer-status': HANDLERS['peer-status'],
+        '/api/connect-car-peer': HANDLERS['connect-car-peer']
       };
 
       const handler = routeHandlers[path];

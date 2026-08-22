@@ -1,4 +1,5 @@
 import { parseCommands } from '../core/parser.js';
+import http from 'http';
 
 const CAMERA_IP = '192.168.0.51';
 const CAMERA_STREAM = `http://${CAMERA_IP}`;
@@ -193,6 +194,46 @@ async function connectPeer(ctx, body) {
     };
   }
 
+  // Validate URL format
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return {
+      ok: false,
+      status: 400,
+      data: { ok: false, error: 'URL inválida. Usá el formato: ws://IP:PUERTO/ws/peer' },
+      error: 'URL inválida'
+    };
+  }
+
+  // Try HTTP health check first
+  const httpPort = parsedUrl.port || 3000;
+  try {
+    await new Promise((resolve, reject) => {
+      const req = http.get(`http://${parsedUrl.hostname}:${httpPort}/api/health`, { timeout: 3000 }, (res) => {
+        if (res.statusCode === 200) {
+          resolve();
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}`));
+        }
+        res.resume();
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      status: 502,
+      data: {
+        ok: false,
+        error: `No se pudo contactar al peer en ${parsedUrl.hostname}:${httpPort}. Verificá que el backend esté corriendo y la IP sea correcta.`
+      },
+      error: 'Peer no disponible'
+    };
+  }
+
   try {
     const result = await ctx.peerAdapter.connect(url);
     return { ok: true, status: 200, data: result, error: null };
@@ -200,7 +241,7 @@ async function connectPeer(ctx, body) {
     return {
       ok: false,
       status: 502,
-      data: { ok: false, error: err.message },
+      data: { ok: false, error: `Error conectando al peer: ${err.message}` },
       error: err.message
     };
   }
@@ -229,6 +270,36 @@ async function peerStatus(ctx) {
   };
 }
 
+async function connectCarPeer(ctx, body) {
+  const { ip, port } = body;
+
+  if (!ctx.peerAdapter.connected) {
+    return {
+      ok: false,
+      status: 409,
+      data: { ok: false, error: 'No hay conexión con el peer. Conectá el peer primero.' },
+      error: 'Peer no conectado'
+    };
+  }
+
+  try {
+    ctx.peerAdapter.sendConnectCar(ip || '192.168.0.50', port || 80);
+    return {
+      ok: true,
+      status: 200,
+      data: { ok: true, message: 'Orden de conectar carro enviada al peer' },
+      error: null
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      data: { ok: false, error: err.message },
+      error: err.message
+    };
+  }
+}
+
 export const HANDLERS = {
   health,
   rangos,
@@ -243,5 +314,6 @@ export const HANDLERS = {
   audit,
   'connect-peer': connectPeer,
   'disconnect-peer': disconnectPeer,
-  'peer-status': peerStatus
+  'peer-status': peerStatus,
+  'connect-car-peer': connectCarPeer
 };

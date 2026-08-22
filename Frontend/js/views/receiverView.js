@@ -372,8 +372,19 @@ class ReceiverView {
       return;
     }
 
+    // Validate URL format
+    if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+      this.addAuditLog('URL inválida. Debe empezar con ws:// o wss://', 'invalid');
+      return;
+    }
+    if (!url.includes('/ws/peer')) {
+      this.addAuditLog('URL inválida. Debe terminar en /ws/peer (ej: ws://IP:3000/ws/peer)', 'invalid');
+      return;
+    }
+
     this.addAuditLog(`Conectando al peer: ${url}`, 'info');
     this.peerConnectBtn.disabled = true;
+    this.peerStatus.textContent = 'Conectando...';
 
     try {
       const res = await this.client.request('connect-peer', { url });
@@ -384,16 +395,23 @@ class ReceiverView {
         this.peerDisconnectBtn.disabled = false;
         this.addAuditLog(`Peer conectado: ${res.data.address}`, 'valid');
       } else {
+        const errorMsg = res.data?.error || res.error || 'Error desconocido';
         this.peerStatus.textContent = 'Error de conexión';
         this.peerStatus.className = 'peer-status peer-error';
         this.peerConnectBtn.disabled = false;
-        this.addAuditLog(`Error conectando peer: ${res.data?.error || res.error}`, 'invalid');
+        this.addAuditLog(`Error conectando peer: ${errorMsg}`, 'invalid');
       }
     } catch (err) {
       this.peerStatus.textContent = 'Error de conexión';
       this.peerStatus.className = 'peer-status peer-error';
       this.peerConnectBtn.disabled = false;
-      this.addAuditLog(`Error de conexión: ${err.message}`, 'invalid');
+      if (err.message === 'Timeout') {
+        this.addAuditLog('Timeout: tu backend no respondió. Verificá que esté corriendo en localhost:3000', 'invalid');
+      } else if (err.message === 'WS no disponible') {
+        this.addAuditLog('Tu backend no está conectado. Recargá la página (F5) y verificá que el backend esté corriendo', 'invalid');
+      } else {
+        this.addAuditLog(`Error de conexión: ${err.message}`, 'invalid');
+      }
     }
   }
 
