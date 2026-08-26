@@ -125,6 +125,15 @@ export class TransmisorService {
       return { ok: false, status: 400, error: `Comando desconocido '${command}'` };
     }
 
+    // Check connection FIRST — don't build sequence if we can't send it
+    if (!this.carService.connected) {
+      return {
+        ok: false,
+        status: 409,
+        error: 'No hay conexión con el carro. Conecta la ESP32 en el panel Receptor o inicia el simulador.'
+      };
+    }
+
     const reps = Math.max(1, Math.min(parseInt(repetitions, 10) || 1, 9));
     const sequence = [];
 
@@ -136,14 +145,6 @@ export class TransmisorService {
         step: i + 1,
         total: reps
       });
-    }
-
-    if (!this.carService.connected) {
-      return {
-        ok: false,
-        status: 409,
-        error: 'No hay conexión con el carro. Conecta la ESP32 en el panel Receptor o inicia el simulador.'
-      };
     }
 
     const sequenceId = uuidv4();
@@ -186,7 +187,7 @@ export class TransmisorService {
   }
 
   classifyNumber(number) {
-    if (!Number.isInteger(Number(number))) {
+    if (number === '' || number === null || number === undefined || !Number.isInteger(Number(number))) {
       return { ok: false, status: 400, error: 'Número inválido' };
     }
 

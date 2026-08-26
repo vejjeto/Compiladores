@@ -1,4 +1,4 @@
-export const PRIMES = [41, 43, 47, 53, 59, 61];
+import { tablaService } from '../services/tablaService.js';
 
 export function divisibilityAutomaton(number, prime) {
   if (!Number.isInteger(number) || number < 0) {
@@ -16,10 +16,35 @@ export function divisibilityAutomaton(number, prime) {
   return state === 0;
 }
 
+export function getAutomatonTransitions(number, prime) {
+  if (!Number.isInteger(number) || number < 0) return null;
+  
+  const digits = number.toString().split('').map(Number);
+  let state = 0;
+  const a = 10 % prime;
+  const transitions = [{ step: 0, digit: null, state: 0 }];
+
+  for (let i = 0; i < digits.length; i++) {
+    const digit = digits[i];
+    const previousState = state;
+    state = (a * state + digit) % prime;
+    
+    transitions.push({
+      step: i + 1,
+      digit: digit,
+      previousState: previousState,
+      state: state
+    });
+  }
+
+  return { prime, transitions, isDivisible: state === 0 };
+}
+
 export function getClassificationResults(number) {
   const results = {};
+  const primes = tablaService.getPrimes();
 
-  for (const prime of PRIMES) {
+  for (const prime of primes) {
     results[prime] = divisibilityAutomaton(number, prime);
   }
 

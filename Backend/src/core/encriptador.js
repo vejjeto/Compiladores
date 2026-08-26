@@ -1,29 +1,13 @@
-import { getClassificationResults, countDivisibilities, PRIMES } from './automatas.js';
+import { getClassificationResults, countDivisibilities } from './automatas.js';
+import { tablaService } from '../services/tablaService.js';
 import logger from '../utils/logger.js';
 
-export const COMMAND_RANGE = {
-  F: { min: 1000, max: 1999, name: 'Avanzar' },
-  B: { min: 2000, max: 2999, name: 'Retroceder' },
-  R: { min: 3000, max: 3999, name: 'Girar Derecha' },
-  L: { min: 4000, max: 4999, name: 'Girar Izquierda' },
-  O: { min: 5000, max: 5999, name: 'Abrir Pinza' },
-  C: { min: 6000, max: 6999, name: 'Cerrar Pinza' },
-  N: { min: 7000, max: 7999, name: 'Encender Cámara' },
-  P: { min: 8000, max: 8999, name: 'Apagar Cámara' },
-  M: { min: 9000, max: 9999, name: 'Liberar Control' }
-};
-
 export function getRangeByCommand(command) {
-  return COMMAND_RANGE[command] || null;
+  return tablaService.getCommandMeta(command) || null;
 }
 
 export function getCommandByRange(number) {
-  for (const [command, range] of Object.entries(COMMAND_RANGE)) {
-    if (number >= range.min && number <= range.max) {
-      return { command, ...range };
-    }
-  }
-  return null;
+  return tablaService.getCommandByRange(number);
 }
 
 export function generarNumeroConIntentos(command) {
@@ -59,6 +43,8 @@ export function clasificarNumero(number) {
   const results = getClassificationResults(number);
   const divisibleCount = countDivisibilities(results);
   const rangeEntry = getCommandByRange(number);
+  
+  const PRIMES = tablaService.getPrimes();
 
   let classifiedAs;
   let command = null;
@@ -72,7 +58,9 @@ export function clasificarNumero(number) {
     logger.error('Encriptador', `Number ${number} classified as CORRUPTO. ${details}`);
   } else if (rangeEntry && divisibleCount === 1) {
     classifiedAs = 'VALIDO';
-    command = rangeEntry.command;
+    // 'command' in the tablaService is actually the key, but it's 'esp32' inside. 
+    // We can use esp32 which equals the command letter.
+    command = rangeEntry.esp32;
     name = rangeEntry.name;
     const divisiblePrime = PRIMES.find((p) => results[p]);
     details = `Divisible por ${divisiblePrime} → ${name}`;
@@ -104,23 +92,25 @@ export function codificarPrograma(comandos) {
   for (const cmd of comandos) {
     const repetitions = Math.max(1, cmd.repetitions || 1);
 
-    for (let i = 0; i < repetitions; i++) {
-      const { numero, intentos } = generarNumeroConIntentos(cmd.command);
+    const { numero, intentos } = generarNumeroConIntentos(cmd.command);
 
-      if (numero == null) {
-        continue;
-      }
-
-      bloques.push({
-        numero,
-        command: cmd.command,
-        name: cmd.name || getRangeByCommand(cmd.command)?.name || null,
-        intentos
-      });
+    if (numero == null) {
+      continue;
     }
+
+    const bloqueCompleto = `${numero}${repetitions}`;
+
+    bloques.push({
+      numero,
+      repeticiones: repetitions,
+      bloqueCompleto,
+      command: cmd.command,
+      name: cmd.name || getRangeByCommand(cmd.command)?.name || null,
+      intentos
+    });
   }
 
-  const numeroUnico = bloques.map((b) => String(b.numero)).join('');
+  const numeroUnico = bloques.map((b) => b.bloqueCompleto).join('');
 
   return { numeroUnico, bloques };
 }
@@ -133,10 +123,10 @@ export function decodificarPrograma(numeroStr) {
     return { valid: false, errors: ['El programa numérico está vacío'], decoded: [], bloques: [] };
   }
 
-  if (raw.length % 4 !== 0) {
+  if (raw.length % 5 !== 0) {
     return {
       valid: false,
-      errors: [`La longitud del programa numérico debe ser múltiplo de 4 (recibido ${raw.length} dígitos)`],
+      errors: [`La longitud del programa numérico debe ser múltiplo de 5 (recibido ${raw.length} dígitos)`],
       decoded: [],
       bloques: []
     };
@@ -145,14 +135,16 @@ export function decodificarPrograma(numeroStr) {
   const bloques = [];
   const decoded = [];
 
-  for (let i = 0; i < raw.length; i += 4) {
-    const blockStr = raw.slice(i, i + 4);
-    const numero = Number(blockStr);
-    const blockIndex = i / 4 + 1;
+  for (let i = 0; i < raw.length; i += 5) {
+    const numStr = raw.slice(i, i + 4);
+    const repStr = raw.slice(i + 4, i + 5);
+    const numero = Number(numStr);
+    const repeticiones = Number(repStr);
+    const blockIndex = i / 5 + 1;
 
-    if (!Number.isInteger(numero) || numero < 1000 || numero > 9999) {
-      errors.push(`Bloque ${blockIndex}: '${blockStr}' no es un número de 4 dígitos entre 1000 y 9999`);
-      bloques.push({ numero: blockStr, classification: 'INVALIDO', classifiedAs: 'INVALIDO', command: null, name: null });
+    if (!Number.isInteger(numero) || numero < 1000 || numero > 9999 || repeticiones < 1 || repeticiones > 9) {
+      errors.push(`Bloque ${blockIndex}: '${numStr}${repStr}' es inválido (N° de 4 dígitos + 1 dígito de repetición)`);
+      bloques.push({ bloqueCompleto: `${numStr}${repStr}`, classification: 'INVALIDO', classifiedAs: 'INVALIDO', command: null, name: null });
       continue;
     }
 
@@ -160,16 +152,16 @@ export function decodificarPrograma(numeroStr) {
 
     if (classification.classifiedAs !== 'VALIDO') {
       errors.push(`Bloque ${blockIndex}: N°${numero} rechazado (${classification.classifiedAs}): ${classification.details}`);
-      bloques.push({ numero, ...classification });
+      bloques.push({ bloqueCompleto: `${numStr}${repStr}`, numero, repeticiones, ...classification });
       continue;
     }
 
-    bloques.push({ numero, ...classification });
+    bloques.push({ bloqueCompleto: `${numStr}${repStr}`, numero, repeticiones, ...classification });
     decoded.push({
       command: classification.command,
-      repetitions: 1,
+      repetitions: repeticiones,
       numero,
-      token: classification.command,
+      token: `${classification.command}${repeticiones > 1 ? ':' + repeticiones : ''}`,
       esp32Char: classification.command,
       name: classification.name,
       type: null

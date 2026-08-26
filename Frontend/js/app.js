@@ -3,7 +3,7 @@ class App {
     this.currentRole = 'transmitter';
     this.backendUrl = this.normalizeBackendUrl(localStorage.getItem('backendUrl')) || this.inferBackendUrl();
 
-    const transportMode = localStorage.getItem('transportMode') || 'auto';
+    const transportMode = 'ws';
     this.client = new BackendClient(this.backendUrl, transportMode);
     this.transmitterView = new TransmitterView(this.client);
     this.receiverView = new ReceiverView(this.client);
@@ -11,7 +11,6 @@ class App {
     this.hookBeeps();
 
     this.roleButtons = document.querySelectorAll('[data-role]');
-    this.transportButtons = document.querySelectorAll('[data-transport]');
     this.views = {
       transmitter: document.getElementById('view-transmitter'),
       receiver: document.getElementById('view-receiver')
@@ -57,19 +56,11 @@ class App {
       });
     });
 
+    // Transport mode is forced to 'ws' - disable transport buttons if present
+    this.transportButtons = document.querySelectorAll('[data-transport]');
     this.transportButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const mode = btn.dataset.transport;
-        this.client.setMode(mode);
-        localStorage.setItem('transportMode', mode);
-        this.transportButtons.forEach(b => {
-          b.classList.toggle('active', b.dataset.transport === mode);
-        });
-      });
-    });
-
-    this.transportButtons.forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.transport === this.client.mode);
+      btn.disabled = true;
+      btn.title = 'Modo WebSocket forzado';
     });
 
     if (this.backendInput) {

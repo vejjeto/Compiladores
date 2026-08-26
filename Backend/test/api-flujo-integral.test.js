@@ -138,8 +138,8 @@ describe('API HTTP - flujo integral (Transmisor → Backend → Carro)', () => {
     const data = await res.json();
     assert.strictEqual(res.status, 200);
     assert.strictEqual(data.valid, true);
-    assert.strictEqual(data.numeroUnico.length, 12);
-    assert.deepStrictEqual(data.bloques.map(b => b.command), ['F', 'F', 'R']);
+    assert.strictEqual(data.numeroUnico.length, 10);
+    assert.deepStrictEqual(data.bloques.map(b => b.command), ['F', 'R']);
   });
 
   it('POST /api/programa-numeros ejecuta un programa encriptado y el carro recibe la secuencia', async () => {

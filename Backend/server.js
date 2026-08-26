@@ -1,4 +1,5 @@
 import http from 'http';
+import { tablaService } from './src/services/tablaService.js';
 import os from 'os';
 import { pathToFileURL } from 'url';
 import { info, warn, error, success } from './src/utils/logger.js';
@@ -7,7 +8,6 @@ import { CarService } from './src/services/carService.js';
 import { AuditService } from './src/services/auditService.js';
 import { TransmisorService } from './src/services/transmisorService.js';
 import * as encriptador from './src/core/encriptador.js';
-import { COMMAND_MAP, MOVEMENT_COMMANDS } from './src/core/parser.js';
 import { HANDLERS } from './src/http/handlers.js';
 import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
 import { PeerAdapter } from './src/adapters/peerAdapter.js';
@@ -189,12 +189,13 @@ async function handleRequest(req, res, ctx) {
     }
 
     if (method === 'GET' && path === '/api/comandos') {
-      const comandos = Object.entries(COMMAND_MAP).map(([cmd, info]) => ({
+      const commandsObj = tablaService.getAllCommands();
+      const comandos = Object.entries(commandsObj).map(([cmd, info]) => ({
         comando: cmd,
         nombre: info.name,
         esp32: info.esp32,
         tipo: info.type,
-        aceptaRepeticion: MOVEMENT_COMMANDS.includes(cmd)
+        aceptaRepeticion: info.type === 'movement'
       }));
       return respond(res, 200, {
         comandos,
@@ -208,6 +209,20 @@ async function handleRequest(req, res, ctx) {
 
     if (method === 'GET' && path === '/api/events') {
       return handleEvents(res, ctx.auditService);
+    }
+
+    if (method === 'GET' && path === '/api/grafo') {
+      const numero = parseInt(url.searchParams.get('numero'), 10);
+      const primo = parseInt(url.searchParams.get('primo'), 10);
+      
+      if (!numero || !primo) {
+        return respond(res, 400, { ok: false, error: 'Faltan parámetros numero y primo' });
+      }
+      
+      // Import dynamic to avoid circular dependencies if any, or use from ctx
+      const { getAutomatonTransitions } = await import('./src/core/automatas.js');
+      const result = getAutomatonTransitions(numero, primo);
+      return respond(res, 200, { ok: true, status: 200, data: result, error: null });
     }
 
     if (method === 'POST') {
@@ -251,6 +266,9 @@ async function handleRequest(req, res, ctx) {
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+// Cargar tablas globalmente (síncrono para que tests y la app funcionen sin cambiar createApp)
+tablaService.loadTableSync();
 
 if (isMain) {
   const { httpServer, carService } = createApp();

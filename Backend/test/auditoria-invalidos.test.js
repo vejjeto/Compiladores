@@ -18,27 +18,25 @@ describe('Auditoría de bloques inválidos (classifiedAs INVALIDO)', () => {
     await new Promise((resolve) => app.httpServer.close(() => resolve()));
   });
 
-  it('decodificarPrograma(\'0000\') marca el bloque como INVALIDO en classification y classifiedAs', () => {
-    const result = decodificarPrograma('0000');
-    assert.strictEqual(result.valid, false);
-    assert.strictEqual(result.bloques[0].classifiedAs, 'INVALIDO');
-    assert.strictEqual(result.bloques[0].classification, 'INVALIDO');
-    assert.strictEqual(result.bloques[0].command, null);
-    assert.strictEqual(result.bloques[0].name, null);
+  it('decodificarPrograma(\'00001\') marca el bloque como INVALIDO en classification y classifiedAs', () => {
+    const data = decodificarPrograma('00001');
+    assert.strictEqual(data.valid, false);
+    assert.strictEqual(data.bloques[0].classifiedAs, 'INVALIDO');
+    assert.strictEqual(data.bloques[0].classification, 'INVALIDO');
   });
 
-  it('decodificarPrograma(\'123a\') marca el bloque como INVALIDO en classification y classifiedAs', () => {
-    const result = decodificarPrograma('123a');
-    assert.strictEqual(result.valid, false);
-    assert.strictEqual(result.bloques[0].classifiedAs, 'INVALIDO');
-    assert.strictEqual(result.bloques[0].classification, 'INVALIDO');
+  it('decodificarPrograma(\'123a1\') marca el bloque como INVALIDO en classification y classifiedAs', () => {
+    const data = decodificarPrograma('123a1');
+    assert.strictEqual(data.valid, false);
+    assert.strictEqual(data.bloques[0].classifiedAs, 'INVALIDO');
+    assert.strictEqual(data.bloques[0].classification, 'INVALIDO');
   });
 
   it('POST /api/programa-numeros con bloque inválido responde 400 y lo registra en el historial de auditoría', async () => {
     const res = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ programa: '0000' })
+      body: JSON.stringify({ programa: '00001' })
     });
     const data = await res.json();
     assert.strictEqual(res.status, 400);

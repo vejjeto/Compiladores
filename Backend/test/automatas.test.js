@@ -1,21 +1,23 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
-  PRIMES,
   divisibilityAutomaton,
   getClassificationResults,
   countDivisibilities,
   getDivisiblePrimes
 } from '../src/core/automatas.js';
+import { tablaService } from '../src/services/tablaService.js';
+
+tablaService.loadTableSync();
 
 describe('Autómata - PRIMES', () => {
 
   it('debe contener 6 primos', () => {
-    assert.strictEqual(PRIMES.length, 6);
+    assert.strictEqual(tablaService.getPrimes().length, 6);
   });
 
   it('debe contener los primos correctos', () => {
-    assert.deepStrictEqual(PRIMES, [41, 43, 47, 53, 59, 61]);
+    assert.deepStrictEqual(tablaService.getPrimes(), [41, 43, 47, 53, 59, 61]);
   });
 
 });
@@ -51,7 +53,7 @@ describe('Autómata - getClassificationResults', () => {
   it('debe retornar resultados para todos los primos', () => {
     const results = getClassificationResults(41);
     const keys = Object.keys(results).map(Number);
-    assert.deepStrictEqual(keys, PRIMES);
+    assert.deepStrictEqual(keys, tablaService.getPrimes());
   });
 
   it('debe clasificar correctamente un número divisible por 41', () => {
@@ -66,7 +68,7 @@ describe('Autómata - getClassificationResults', () => {
 
   it('debe clasificar correctamente un número no divisible', () => {
     const results = getClassificationResults(100);
-    for (const prime of PRIMES) {
+    for (const prime of tablaService.getPrimes()) {
       assert.strictEqual(results[prime], false);
     }
   });

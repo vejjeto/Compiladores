@@ -1,8 +1,6 @@
 import { parseCommands } from '../core/parser.js';
-import http from 'http';
-
-const CAMERA_IP = '192.168.0.51';
-const CAMERA_STREAM = `http://${CAMERA_IP}`;
+import { CAMERA_IP, CAMERA_STREAM, DEFAULT_CAR_IP, DEFAULT_CAR_PORT } from '../config/constants.js';
+import { tablaService } from '../services/tablaService.js';
 
 async function health(ctx) {
   return {
@@ -23,12 +21,22 @@ async function rangos(ctx) {
   return {
     ok: true,
     status: 200,
-    data: { rangos: ctx.encriptador.COMMAND_RANGE },
+    data: { rangos: tablaService.getAllCommands() },
     error: null
   };
 }
 
 async function connect(ctx, body) {
+  // Fase 3: Bloquear conexión manual si el backend actúa como receptor
+  if (ctx.peerAdapter.connected && ctx.peerAdapter.role === 'receiver') {
+    return {
+      ok: false,
+      status: 409,
+      data: { ok: false, error: 'El receptor no puede conectar el carro manualmente; el transmisor lo controla' },
+      error: 'Operación no permitida en modo receptor'
+    };
+  }
+
   const { ip, port } = body;
 
   if (!ip) {
@@ -71,6 +79,11 @@ async function program(ctx, body) {
       data: { ok: false, error: 'El campo "program" es obligatorio' },
       error: 'El campo "program" es obligatorio'
     };
+  }
+
+  if (ctx.peerAdapter.connected && ctx.peerAdapter.role === 'transmitter') {
+    ctx.peerAdapter.sendProgram(body.program);
+    return { ok: true, status: 202, data: { message: 'Programa reenviado al receptor' }, error: null };
   }
 
   const result = ctx.transmisorService.executeProgram(body.program);
@@ -136,6 +149,11 @@ async function programaNumeros(ctx, body) {
     };
   }
 
+  if (ctx.peerAdapter.connected && ctx.peerAdapter.role === 'transmitter') {
+    ctx.peerAdapter.sendProgramaNumeros(body.programa.trim());
+    return { ok: true, status: 202, data: { message: 'Programa encriptado reenviado al receptor' }, error: null };
+  }
+
   const result = ctx.transmisorService.executeEncodedProgram(body.programa.trim());
   return { ok: result.ok, status: result.status, data: result, error: null };
 }
@@ -150,6 +168,11 @@ async function command(ctx, body) {
     };
   }
 
+  if (ctx.peerAdapter.connected && ctx.peerAdapter.role === 'transmitter') {
+    ctx.peerAdapter.sendCommand(body.command, body.repetitions);
+    return { ok: true, status: 202, data: { message: 'Comando reenviado al receptor' }, error: null };
+  }
+
   const result = ctx.transmisorService.executeCommand(body.command, body.repetitions);
   return { ok: result.ok, status: result.status, data: result, error: null };
 }
@@ -162,6 +185,11 @@ async function raw(ctx, body) {
       data: { ok: false, error: 'El campo "char" es obligatorio' },
       error: 'El campo "char" es obligatorio'
     };
+  }
+
+  if (ctx.peerAdapter.connected && ctx.peerAdapter.role === 'transmitter') {
+    ctx.peerAdapter.sendRawChar(body.char);
+    return { ok: true, status: 202, data: { message: 'Carácter crudo reenviado al receptor' }, error: null };
   }
 
   const result = ctx.transmisorService.sendRawChar(body.char);
@@ -195,9 +223,8 @@ async function connectPeer(ctx, body) {
   }
 
   // Validate URL format
-  let parsedUrl;
   try {
-    parsedUrl = new URL(url);
+    new URL(url);
   } catch {
     return {
       ok: false,
@@ -207,33 +234,7 @@ async function connectPeer(ctx, body) {
     };
   }
 
-  // Try HTTP health check first
-  const httpPort = parsedUrl.port || 3000;
-  try {
-    await new Promise((resolve, reject) => {
-      const req = http.get(`http://${parsedUrl.hostname}:${httpPort}/api/health`, { timeout: 3000 }, (res) => {
-        if (res.statusCode === 200) {
-          resolve();
-        } else {
-          reject(new Error(`HTTP ${res.statusCode}`));
-        }
-        res.resume();
-      });
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      status: 502,
-      data: {
-        ok: false,
-        error: `No se pudo contactar al peer en ${parsedUrl.hostname}:${httpPort}. Verificá que el backend esté corriendo y la IP sea correcta.`
-      },
-      error: 'Peer no disponible'
-    };
-  }
-
+  // Pure WebSocket — no HTTP fallback
   try {
     const result = await ctx.peerAdapter.connect(url);
     return { ok: true, status: 200, data: result, error: null };
@@ -283,7 +284,7 @@ async function connectCarPeer(ctx, body) {
   }
 
   try {
-    ctx.peerAdapter.sendConnectCar(ip || '192.168.0.50', port || 80);
+    ctx.peerAdapter.sendConnectCar(ip || DEFAULT_CAR_IP, port || DEFAULT_CAR_PORT);
     return {
       ok: true,
       status: 200,

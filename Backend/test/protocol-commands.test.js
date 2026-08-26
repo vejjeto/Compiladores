@@ -8,6 +8,9 @@ import {
   matchAck,
   VOCABULARY
 } from '../src/protocol/commands.js';
+import { tablaService } from '../src/services/tablaService.js';
+
+tablaService.loadTableSync();
 
 describe('PROTOCOL_VERSION', () => {
   it('is version 1', () => {
@@ -106,24 +109,29 @@ describe('matchAck', () => {
 });
 
 describe('VOCABULARY', () => {
-  it('contains all 9 commands with correct standard names', () => {
-    const expected = {
-      F: 'move.forward',
-      B: 'move.backward',
-      R: 'turn.right',
-      L: 'turn.left',
-      O: 'gripper.open',
-      C: 'gripper.close',
-      N: 'camera.on',
-      P: 'camera.off',
-      M: 'control.release'
-    };
+  it('should map core ESP32 commands to standard semantic names', () => {
+    // Es necesario inicializar la tabla para que se pueda leer
+    import('../src/services/tablaService.js').then(({ tablaService }) => {
+      tablaService.loadTableSync();
+      const vocab = VOCABULARY();
+      const expected = {
+        F: 'move.forward',
+        B: 'move.backward',
+        R: 'turn.right',
+        L: 'turn.left',
+        O: 'gripper.open',
+        C: 'gripper.close',
+        N: 'camera.on',
+        P: 'camera.off',
+        M: 'control.release'
+      };
 
-    for (const [char, standard] of Object.entries(expected)) {
-      assert.ok(VOCABULARY[char], `VOCABULARY is missing '${char}'`);
-      assert.strictEqual(VOCABULARY[char].standard, standard);
-      assert.strictEqual(VOCABULARY[char].char, char);
-    }
-    assert.strictEqual(Object.keys(VOCABULARY).length, 9);
+      for (const [char, standard] of Object.entries(expected)) {
+        assert.ok(vocab[char], `VOCABULARY is missing '${char}'`);
+        assert.strictEqual(vocab[char].standard, standard);
+        assert.strictEqual(vocab[char].char, char);
+      }
+      assert.strictEqual(Object.keys(vocab).length, 9);
+    });
   });
 });

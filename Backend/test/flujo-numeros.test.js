@@ -132,15 +132,15 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
     assert.ok(data.errors.some(e => e.includes('no vacío')));
   });
 
-  it('POST /api/programa-numeros con programa sin múltiplo de 4 devuelve 400', async () => {
+  it('POST /api/programa-numeros con programa sin múltiplo de 5 devuelve 400', async () => {
     const res = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ programa: '10251' })
+      body: JSON.stringify({ programa: '102511' }) // 6 digits
     });
     const data = await res.json();
     assert.strictEqual(res.status, 400);
-    assert.ok(data.errors.some(e => e.includes('múltiplo de 4')));
+    assert.ok(data.errors.some(e => e.includes('múltiplo de 5')));
   });
 
   it('POST /api/connect conecta al carro vía WebSocket', async () => {
@@ -169,7 +169,7 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
 
     assert.strictEqual(res.status, 202);
     assert.ok(data.sequenceId);
-    assert.deepStrictEqual(data.decoded.map(d => d.command), ['F', 'F', 'F', 'R']);
+    assert.deepStrictEqual(data.decoded.map(d => d.command), ['F', 'R']);
     assert.strictEqual(data.totalSteps, 4);
     assert.strictEqual(data.esp32Sequence.map(s => s.char).join(''), 'FFFR');
     assert.ok(data.esp32Sequence.every(s => s.numero != null));
@@ -192,7 +192,7 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
     const res = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ programa: `1000${programaDe('F')}` })
+      body: JSON.stringify({ programa: `10001${programaDe('F')}` }) // Add repetition digit 1
     });
     const data = await res.json();
     assert.strictEqual(res.status, 400);
@@ -204,7 +204,7 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
     const res = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ programa: '1763' })
+      body: JSON.stringify({ programa: '17631' }) // Add repetition digit 1
     });
     const data = await res.json();
     assert.strictEqual(res.status, 400);
@@ -231,9 +231,9 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
     const data = await res.json();
     assert.strictEqual(res.status, 200);
     assert.strictEqual(data.valid, true);
-    assert.strictEqual(data.bloques.length, 4);
-    assert.strictEqual(data.numeroUnico.length, 16);
-    assert.deepStrictEqual(data.bloques.map(b => b.command), ['F', 'F', 'F', 'R']);
+    assert.strictEqual(data.bloques.length, 2);
+    assert.strictEqual(data.numeroUnico.length, 10);
+    assert.deepStrictEqual(data.bloques.map(b => b.command), ['F', 'R']);
 
     const run = await fetch(`http://127.0.0.1:${appPort}/api/programa-numeros`, {
       method: 'POST',
@@ -243,7 +243,7 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
     const runData = await run.json();
     assert.strictEqual(run.status, 202);
     assert.strictEqual(runData.totalSteps, 4);
-    assert.deepStrictEqual(runData.decoded.map(d => d.command), ['F', 'F', 'F', 'R']);
+    assert.deepStrictEqual(runData.decoded.map(d => d.command), ['F', 'R']);
   });
 
   it('POST /api/codificar con programa inválido devuelve 400', async () => {

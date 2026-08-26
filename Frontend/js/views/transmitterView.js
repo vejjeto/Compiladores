@@ -155,7 +155,7 @@ class TransmitterView {
       if (peerConnected) {
         this.addLog('Programa inicia con N — pidiendo conexión de carro al receptor...', 'info');
         try {
-          await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
+          await this.client.request('connect-car-peer', { ip: NetworkConfig.CAR_IP, port: NetworkConfig.CAR_PORT });
           await new Promise(r => setTimeout(r, 1500));
         } catch { /* ignore */ }
       }
@@ -233,12 +233,12 @@ class TransmitterView {
       // Peer mode: tell receiver to connect to car first
       this.addLog('Pidiendo al receptor que conecte el carro...', 'info');
       try {
-        const connectRes = await this.client.request('connect-car-peer', { ip: '192.168.0.50', port: 80 });
+        const connectRes = await this.client.request('connect-car-peer', { ip: NetworkConfig.CAR_IP, port: NetworkConfig.CAR_PORT });
         if (!connectRes.ok) {
           this.addLog(`Error: ${connectRes.data?.error || connectRes.error}`, 'invalid');
           return;
         }
-        this.addLog('Receptor conectando al carro (192.168.0.50)...', 'info');
+        this.addLog(`Receptor conectando al carro (${NetworkConfig.CAR_IP})...`, 'info');
         await new Promise(r => setTimeout(r, 1500));
       } catch (err) {
         this.addLog(`Error: ${err.message}`, 'invalid');
@@ -290,7 +290,7 @@ class TransmitterView {
         this.cameraOnBtn.disabled = false;
         this.cameraOffBtn.disabled = true;
         this.stopVideo();
-        this.addLog(`Cámara apagada — N°${res.data.esp32Char} encriptado`, 'warn');
+        this.addLog(`Cámara apagada (P) — secuencia ${res.data.sequenceId}`, 'warn');
       } else {
         const errorMsg = res.data?.error || res.error || 'desconocido';
         this.addLog(`Error apagando cámara: ${errorMsg}`, 'invalid');

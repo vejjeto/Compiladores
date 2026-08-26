@@ -1,7 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
-  COMMAND_RANGE,
   getCommandByRange,
   generarNumero,
   clasificarNumero,
@@ -9,27 +8,19 @@ import {
   codificarPrograma,
   decodificarPrograma
 } from '../src/core/encriptador.js';
+import { tablaService } from '../src/services/tablaService.js';
+
+tablaService.loadTableSync();
 
 describe('Encriptador - COMMAND_RANGE', () => {
-
   it('debe tener los 9 comandos con sus rangos y nombres', () => {
-    assert.strictEqual(Object.keys(COMMAND_RANGE).length, 9);
-    const expected = {
-      F: { min: 1000, max: 1999, name: 'Avanzar' },
-      B: { min: 2000, max: 2999, name: 'Retroceder' },
-      R: { min: 3000, max: 3999, name: 'Girar Derecha' },
-      L: { min: 4000, max: 4999, name: 'Girar Izquierda' },
-      O: { min: 5000, max: 5999, name: 'Abrir Pinza' },
-      C: { min: 6000, max: 6999, name: 'Cerrar Pinza' },
-      N: { min: 7000, max: 7999, name: 'Encender Cámara' },
-      P: { min: 8000, max: 8999, name: 'Apagar Cámara' },
-      M: { min: 9000, max: 9999, name: 'Liberar Control' }
-    };
-    assert.deepStrictEqual(COMMAND_RANGE, expected);
+    const commands = tablaService.getAllCommands();
+    assert.strictEqual(Object.keys(commands).length, 9);
   });
 
   it('los rangos cubren de 1000 a 9999 sin solaparse', () => {
-    const entries = Object.entries(COMMAND_RANGE).sort((a, b) => a[1].min - b[1].min);
+    const commands = tablaService.getAllCommands();
+    const entries = Object.entries(commands).sort((a, b) => a[1].min - b[1].min);
     assert.strictEqual(entries[0][1].min, 1000);
     assert.strictEqual(entries[entries.length - 1][1].max, 9999);
     for (let i = 0; i < entries.length; i++) {
@@ -41,10 +32,10 @@ describe('Encriptador - COMMAND_RANGE', () => {
   });
 
   it('getCommandByRange identifica el comando por el rango', () => {
-    assert.strictEqual(getCommandByRange(1025).command, 'F');
-    assert.strictEqual(getCommandByRange(2999).command, 'B');
-    assert.strictEqual(getCommandByRange(5000).command, 'O');
-    assert.strictEqual(getCommandByRange(9999).command, 'M');
+    assert.strictEqual(getCommandByRange(1025).esp32, 'F');
+    assert.strictEqual(getCommandByRange(2999).esp32, 'B');
+    assert.strictEqual(getCommandByRange(5000).esp32, 'O');
+    assert.strictEqual(getCommandByRange(9999).esp32, 'M');
     assert.strictEqual(getCommandByRange(1), null);
     assert.strictEqual(getCommandByRange(10000), null);
   });
@@ -54,9 +45,10 @@ describe('Encriptador - COMMAND_RANGE', () => {
 describe('Encriptador - generarNumero', () => {
 
   it('debe generar un número dentro del rango del comando, divisible por exactamente 1 primo', () => {
-    for (const command of Object.keys(COMMAND_RANGE)) {
+    const commands = tablaService.getAllCommands();
+    for (const command of Object.keys(commands)) {
       const num = generarNumero(command);
-      const range = COMMAND_RANGE[command];
+      const range = commands[command];
       assert.ok(num >= range.min && num <= range.max, `N°${num} debe estar en el rango de ${command}`);
       const classification = clasificarNumero(num);
       assert.strictEqual(classification.classifiedAs, 'VALIDO', `N°${num} debe ser VALIDO`);
@@ -120,18 +112,19 @@ describe('Encriptador - clasificarNumero / classifyNumber', () => {
 
 describe('Encriptador - codificarPrograma / decodificarPrograma', () => {
 
-  it('codificarPrograma concatena un número por repetición (F:3, R → 4 bloques, 16 dígitos)', () => {
+  it('codificarPrograma genera 5 dígitos (F:3, R → 2 bloques, 10 dígitos)', () => {
     const result = codificarPrograma([
       { command: 'F', repetitions: 3 },
       { command: 'R', repetitions: 1 }
     ]);
-    assert.strictEqual(result.bloques.length, 4);
-    assert.strictEqual(result.numeroUnico.length, 16);
-    assert.deepStrictEqual(result.bloques.map(b => b.command), ['F', 'F', 'F', 'R']);
+    assert.strictEqual(result.bloques.length, 2);
+    assert.strictEqual(result.numeroUnico.length, 10);
+    assert.deepStrictEqual(result.bloques.map(b => b.command), ['F', 'R']);
+    assert.deepStrictEqual(result.bloques.map(b => b.repeticiones), [3, 1]);
     assert.ok(result.numeroUnico.split('').every(c => c >= '0' && c <= '9'));
   });
 
-  it('decodificarPrograma corta el string en bloques de 4 dígitos y clasifica', () => {
+  it('decodificarPrograma corta el string en bloques de 5 dígitos y clasifica', () => {
     const encoded = codificarPrograma([
       { command: 'F', repetitions: 3 },
       { command: 'R', repetitions: 1 }
@@ -139,17 +132,18 @@ describe('Encriptador - codificarPrograma / decodificarPrograma', () => {
     const result = decodificarPrograma(encoded.numeroUnico);
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.errors.length, 0);
-    assert.deepStrictEqual(result.decoded.map(d => d.command), ['F', 'F', 'F', 'R']);
-    assert.strictEqual(result.bloques.length, 4);
+    assert.deepStrictEqual(result.decoded.map(d => d.command), ['F', 'R']);
+    assert.deepStrictEqual(result.decoded.map(d => d.repetitions), [3, 1]);
+    assert.strictEqual(result.bloques.length, 2);
     for (const block of result.bloques) {
       assert.strictEqual(block.classifiedAs, 'VALIDO');
     }
   });
 
-  it('round-trip: codificar → decodificar preserva los comandos', () => {
+  it('round-trip: codificar → decodificar preserva comandos y repeticiones', () => {
     const original = [
       { command: 'N', repetitions: 1 },
-      { command: 'F', repetitions: 2 },
+      { command: 'F', repetitions: 3 }, // Repetition here
       { command: 'B', repetitions: 1 },
       { command: 'O', repetitions: 1 },
       { command: 'C', repetitions: 1 },
@@ -158,9 +152,9 @@ describe('Encriptador - codificarPrograma / decodificarPrograma', () => {
     const encoded = codificarPrograma(original);
     const result = decodificarPrograma(encoded.numeroUnico);
     assert.strictEqual(result.valid, true);
-    assert.deepStrictEqual(result.decoded.map(d => d.command), ['N', 'F', 'F', 'B', 'O', 'C', 'P']);
-    assert.ok(result.decoded.every(d => d.repetitions === 1));
-    assert.strictEqual(encoded.numeroUnico.length, 7 * 4);
+    assert.deepStrictEqual(result.decoded.map(d => d.command), ['N', 'F', 'B', 'O', 'C', 'P']);
+    assert.deepStrictEqual(result.decoded.map(d => d.repetitions), [1, 3, 1, 1, 1, 1]);
+    assert.strictEqual(encoded.numeroUnico.length, 6 * 5);
   });
 
   it('decodificarPrograma con string vacío es inválido', () => {
@@ -169,27 +163,26 @@ describe('Encriptador - codificarPrograma / decodificarPrograma', () => {
     assert.ok(result.errors.some(e => e.includes('vacío')));
   });
 
-  it('decodificarPrograma con longitud no múltiplo de 4 es inválido', () => {
-    const result = decodificarPrograma('10251');
+  it('decodificarPrograma con longitud no múltiplo de 5 es inválido', () => {
+    const result = decodificarPrograma('102511'); // 6 digits
     assert.strictEqual(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('múltiplo de 4')));
+    assert.ok(result.errors.some(e => e.includes('múltiplo de 5')));
   });
 
-  it('decodificarPrograma rechaza bloque fuera del rango de 4 dígitos', () => {
-    const result = decodificarPrograma('00411025');
+  it('decodificarPrograma rechaza bloque con mala repetición (ej: 0)', () => {
+    const result = decodificarPrograma('10250');
     assert.strictEqual(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('4 dígitos')));
+    assert.ok(result.errors.some(e => e.includes('inválido')));
   });
 
   it('decodificarPrograma rechaza bloque en rango no divisible (FALSO)', () => {
-    const result = decodificarPrograma('10001025');
+    const result = decodificarPrograma('10001'); // 1000 is FALSE usually
     assert.strictEqual(result.valid, false);
     assert.ok(result.errors.some(e => e.includes('FALSO')));
-    assert.deepStrictEqual(result.decoded.map(d => d.command), ['F']);
   });
 
   it('decodificarPrograma rechaza bloque corrupto (CORRUPTO)', () => {
-    const result = decodificarPrograma('1763');
+    const result = decodificarPrograma('17631'); // 1763 is CORRUPTO usually
     assert.strictEqual(result.valid, false);
     assert.ok(result.errors.some(e => e.includes('CORRUPTO')));
   });

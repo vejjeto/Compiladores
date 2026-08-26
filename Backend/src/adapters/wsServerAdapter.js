@@ -203,9 +203,24 @@ export class WsServerAdapter {
     };
     this.ctx.carService.on('message', onCarMessage);
 
-    ws.on('message', async (data) => {
+    ws.on('message', async (raw) => {
       let msg;
-      try { msg = JSON.parse(data.toString()); } catch { return; }
+      try { 
+        msg = JSON.parse(raw.toString()); 
+      } catch { 
+        // Fallback por si llega texto crudo no-JSON
+        const dataStr = raw.toString();
+        if (/^\d+$/.test(dataStr)) {
+          msg = { type: 'programa-numeros', programa: dataStr };
+        } else {
+          return; 
+        }
+      }
+
+      // Modo Compatibilidad GitLab (Receptor): 
+      if (typeof msg === 'number' || (typeof msg === 'string' && /^\d+$/.test(msg))) {
+        msg = { type: 'programa-numeros', programa: String(msg) };
+      }
 
       if (msg.type === 'connect-car') {
         // Transmitter asks receiver to connect to the car

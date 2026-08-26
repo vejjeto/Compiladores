@@ -1,0 +1,69 @@
+{
+  "primes": [41, 43, 47, 53, 59, 61],
+  "commands": {
+    "F": {
+      "esp32": "F",
+      "name": "Avanzar",
+      "type": "movement",
+      "min": 1000,
+      "max": 1999
+    },
+    "B": {
+      "esp32": "B",
+      "name": "Retroceder",
+      "type": "movement",
+      "min": 2000,
+      "max": 2999
+    },
+    "R": {
+      "esp32": "R",
+      "name": "Girar Derecha",
+      "type": "movement",
+      "min": 3000,
+      "max": 3999
+    },
+    "L": {
+      "esp32": "L",
+      "name": "Girar Izquierda",
+      "type": "movement",
+      "min": 4000,
+      "max": 4999
+    },
+    "O": {
+      "esp32": "O",
+      "name": "Abrir Pinza",
+      "type": "action",
+      "min": 5000,
+      "max": 5999
+    },
+    "C": {
+      "esp32": "C",
+      "name": "Cerrar Pinza",
+      "type": "action",
+      "min": 6000,
+      "max": 6999
+    },
+    "N": {
+      "esp32": "N",
+      "name": "Encender Cámara",
+      "type": "camera",
+      "min": 7000,
+      "max": 7999
+    },
+    "P": {
+      "esp32": "P",
+      "name": "Apagar Cámara",
+      "type": "camera",
+      "min": 8000,
+      "max": 8999
+    },
+    "M": {
+      "esp32": "M",
+      "name": "Liberar Control",
+      "type": "action",
+      "min": 9000,
+      "max": 9999
+    }
+  }
+}
+

@@ -32,23 +32,30 @@ class ReceiverView {
   }
 
   bindEvents() {
-    this.connectBtn.addEventListener('click', () => this.connectToCar());
-    this.disconnectBtn.addEventListener('click', () => this.disconnectFromCar());
-    this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
-
+    // Fase 3: Deshabilitar conexión manual del carro — solo el transmisor lo controla
+    this.connectBtn.disabled = true;
+    this.connectBtn.title = 'Conexión controlada por el transmisor';
+    this.disconnectBtn.disabled = true;
+    this.disconnectBtn.title = 'Conexión controlada por el transmisor';
     if (this.autodetectBtn) {
-      this.autodetectBtn.addEventListener('click', () => this.autoDetectCar());
+      this.autodetectBtn.disabled = true;
+      this.autodetectBtn.title = 'Conexión controlada por el transmisor';
     }
+
+    // #6: Receiver cannot initiate peer connections — only accepts incoming
+    if (this.peerConnectBtn) {
+      this.peerConnectBtn.disabled = true;
+      this.peerConnectBtn.title = 'El receptor solo acepta conexiones entrantes del transmisor';
+    }
+    if (this.peerDisconnectBtn) {
+      this.peerDisconnectBtn.disabled = true;
+      this.peerDisconnectBtn.title = 'El receptor solo acepta conexiones entrantes del transmisor';
+    }
+
+    this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
 
     if (this.verifyBtn) {
       this.verifyBtn.addEventListener('click', () => this.verifyNumber());
-    }
-
-    if (this.peerConnectBtn) {
-      this.peerConnectBtn.addEventListener('click', () => this.connectPeer());
-    }
-    if (this.peerDisconnectBtn) {
-      this.peerDisconnectBtn.addEventListener('click', () => this.disconnectPeer());
     }
   }
 

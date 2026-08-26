@@ -1,5 +1,7 @@
 import { WebSocket } from 'ws';
 import logger from '../utils/logger.js';
+import { codificarPrograma } from '../core/encriptador.js';
+import { parseCommands } from '../core/parser.js';
 
 const COMPONENT = 'PEER';
 const CONNECT_TIMEOUT = 5000;
@@ -10,7 +12,8 @@ export class PeerAdapter {
     this.ws = null;
     this.ip = null;
     this.port = null;
-    this.role = null; // 'transmitter' or 'receiver'
+    this.role = null;
+    this.isGitlabCompat = false;
     this.listeners = new Set();
   }
 
@@ -28,9 +31,10 @@ export class PeerAdapter {
     }
 
     this.role = role;
+    this.isGitlabCompat = url.endsWith('/transmisor');
 
     return new Promise((resolve, reject) => {
-      logger.info(COMPONENT, `Conectando peer en ${url} (rol: ${role})`);
+      logger.info(COMPONENT, `Conectando peer en ${url} (rol: ${role}, gitlabCompat: ${this.isGitlabCompat})`);
 
       const ws = new WebSocket(url);
       let settled = false;
@@ -49,9 +53,14 @@ export class PeerAdapter {
         clearTimeout(timeout);
         this.ws = ws;
 
-        const urlObj = new URL(url);
-        this.ip = urlObj.hostname;
-        this.port = urlObj.port;
+        try {
+          const urlObj = new URL(url);
+          this.ip = urlObj.hostname;
+          this.port = urlObj.port || (urlObj.protocol === 'wss:' ? '443' : '80');
+        } catch {
+          this.ip = url;
+          this.port = 'unknown';
+        }
 
         logger.success(COMPONENT, `Peer conectado en ${url} (rol: ${role})`);
         this._notifyListeners({ type: 'peer-connected', role, address: this.address });
@@ -97,18 +106,57 @@ export class PeerAdapter {
     }
   }
 
-  sendCommand(command) {
-    if (!this.connected) {
-      throw new Error('No hay conexión con el peer');
+  sendCommand(command, repetitions) {
+    if (!this.connected) throw new Error('No hay conexión con el peer');
+    if (this.isGitlabCompat) {
+      const { numeroUnico } = codificarPrograma([{ command, repetitions: repetitions || 1 }]);
+      this.ws.send(numeroUnico);
+    } else {
+      this.ws.send(JSON.stringify({ type: 'command', command, repetitions }));
     }
-    this.ws.send(JSON.stringify({ type: 'command', command }));
+  }
+
+  sendProgram(program) {
+    if (!this.connected) throw new Error('No hay conexión con el peer');
+    if (this.isGitlabCompat) {
+      const parsed = parseCommands(program);
+      if (parsed.valid) {
+        const { numeroUnico } = codificarPrograma(parsed.commands);
+        this.ws.send(numeroUnico);
+      }
+    } else {
+      this.ws.send(JSON.stringify({ type: 'program', program }));
+    }
+  }
+
+  sendProgramaNumeros(programa) {
+    if (!this.connected) throw new Error('No hay conexión con el peer');
+    if (this.isGitlabCompat) {
+      this.ws.send(programa);
+    } else {
+      this.ws.send(JSON.stringify({ type: 'programa-numeros', programa }));
+    }
+  }
+
+  sendRawChar(char) {
+    if (!this.connected) throw new Error('No hay conexión con el peer');
+    if (this.isGitlabCompat) {
+      // Intenta mandarlo codificado, aunque no se recomienda para raw en GitLab
+      const { numeroUnico } = codificarPrograma([{ command: char, repetitions: 1 }]);
+      if (numeroUnico) this.ws.send(numeroUnico);
+    } else {
+      this.ws.send(JSON.stringify({ type: 'raw', char }));
+    }
   }
 
   sendConnectCar(ip, port) {
-    if (!this.connected) {
-      throw new Error('No hay conexión con el peer');
+    if (!this.connected) throw new Error('No hay conexión con el peer');
+    if (this.isGitlabCompat) {
+      // El proyecto de GitLab ignora esto o usa POST /robot
+      logger.warn(COMPONENT, 'sendConnectCar ignorado en modo GitLab (usa POST /robot directo al receptor)');
+    } else {
+      this.ws.send(JSON.stringify({ type: 'connect-car', ip, port }));
     }
-    this.ws.send(JSON.stringify({ type: 'connect-car', ip, port }));
   }
 
   sendEvent(event, data) {
@@ -174,17 +222,13 @@ export class PeerAdapter {
     const result = transmisorService.executeCommand(command);
 
     if (result.ok) {
-      // Forward sequence events back to the peer
-      const origBroadcast = auditService.broadcast.bind(auditService);
-      auditService.broadcast = (type, data) => {
-        origBroadcast(type, data);
+      // Forward sequence events back to the peer via subscription (no monkey-patch)
+      const unsub = auditService.subscribe(({ type, data }) => {
         this.sendEvent(type, data);
-      };
+      });
 
-      // Restore after sequence completes
-      setTimeout(() => {
-        auditService.broadcast = origBroadcast;
-      }, 30000);
+      // Auto-unsubscribe after max sequence duration (safety net)
+      setTimeout(() => { unsub(); }, 60000);
 
       this.sendEvent('COMMAND_ACCEPTED', { command, sequenceId: result.sequenceId });
     } else {

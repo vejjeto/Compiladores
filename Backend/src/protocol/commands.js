@@ -1,4 +1,4 @@
-import { COMMAND_MAP } from '../core/parser.js';
+import { tablaService } from '../services/tablaService.js';
 
 export const PROTOCOL_VERSION = 1;
 
@@ -14,8 +14,8 @@ const STANDARD_NAMES = {
   M: 'control.release'
 };
 
-export const VOCABULARY = Object.fromEntries(
-  Object.entries(COMMAND_MAP).map(([char, meta]) => [
+export const VOCABULARY = () => Object.fromEntries(
+  Object.entries(tablaService.getAllCommands()).map(([char, meta]) => [
     char,
     {
       char: meta.esp32,
@@ -27,7 +27,7 @@ export const VOCABULARY = Object.fromEntries(
 );
 
 export function buildCommand({ cmd, params = {}, ackId } = {}) {
-  if (!COMMAND_MAP[cmd]) {
+  if (!tablaService.getCommandMeta(cmd)) {
     throw new TypeError(`buildCommand: unknown command '${cmd}'`);
   }
   return JSON.stringify({ v: PROTOCOL_VERSION, cmd, params, ackId });

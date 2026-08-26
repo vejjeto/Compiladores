@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { parseCommands, getCommandInfo, COMMAND_MAP } from '../src/core/parser.js';
+import { parseCommands, getCommandInfo } from '../src/core/parser.js';
+import { tablaService } from '../src/services/tablaService.js';
+
+tablaService.loadTableSync();
 
 describe('Parser - parseCommands', () => {
 
@@ -122,7 +125,7 @@ describe('Parser - getCommandInfo', () => {
 
   it('debe retornar info de comando válido', () => {
     const info = getCommandInfo('F');
-    assert.deepStrictEqual(info, { esp32: 'F', name: 'Avanzar', type: 'movement' });
+    assert.deepStrictEqual(info, { esp32: 'F', name: 'Avanzar', type: 'movement', min: 1000, max: 1999 });
   });
 
   it('debe retornar null para comando desconocido', () => {
@@ -132,13 +135,12 @@ describe('Parser - getCommandInfo', () => {
 
 });
 
-describe('Parser - COMMAND_MAP', () => {
-
+describe('Parser - tablaService commands', () => {
   it('debe tener todos los comandos definidos', () => {
     const expected = ['F', 'B', 'R', 'L', 'O', 'C', 'N', 'P', 'M'];
+    const commands = tablaService.getAllCommands();
     for (const cmd of expected) {
-      assert.ok(COMMAND_MAP[cmd], `Falta comando ${cmd}`);
+      assert.ok(commands[cmd], `Falta comando ${cmd}`);
     }
   });
-
 });

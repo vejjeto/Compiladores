@@ -1,17 +1,5 @@
-const COMMAND_MAP = {
-  F: { esp32: 'F', name: 'Avanzar', type: 'movement' },
-  B: { esp32: 'B', name: 'Retroceder', type: 'movement' },
-  R: { esp32: 'R', name: 'Girar Derecha', type: 'movement' },
-  L: { esp32: 'L', name: 'Girar Izquierda', type: 'movement' },
-  O: { esp32: 'O', name: 'Abrir Pinza', type: 'action' },
-  C: { esp32: 'C', name: 'Cerrar Pinza', type: 'action' },
-  N: { esp32: 'N', name: 'Encender Cámara', type: 'camera' },
-  P: { esp32: 'P', name: 'Apagar Cámara', type: 'camera' },
-  M: { esp32: 'M', name: 'Liberar Control', type: 'action' }
-};
+import { tablaService } from '../services/tablaService.js';
 
-const MOVEMENT_COMMANDS = ['F', 'B', 'R', 'L'];
-const ACTION_COMMANDS = ['O', 'C', 'N', 'P', 'M'];
 const COMMAND_REGEX = /^([A-Z])(?::([1-9]))?$/;
 
 export function parseCommands(inputString) {
@@ -35,14 +23,14 @@ export function parseCommands(inputString) {
     }
 
     const [, cmd, repStr] = match;
+    const mapping = tablaService.getCommandMeta(cmd);
 
-    if (!COMMAND_MAP[cmd]) {
+    if (!mapping) {
       errors.push(`Comando desconocido '${cmd}' en posición ${i + 1}`);
       continue;
     }
 
     const repetitions = repStr ? parseInt(repStr, 10) : 1;
-    const mapping = COMMAND_MAP[cmd];
 
     commands.push({
       command: cmd,
@@ -81,11 +69,14 @@ export function validateCommands(commands) {
 
   for (let i = 0; i < commands.length; i++) {
     const cmd = commands[i];
+    const mapping = tablaService.getCommandMeta(cmd.command);
 
-    if (!COMMAND_MAP[cmd.command]) {
+    if (!mapping) {
       errors.push(`Comando desconocido '${cmd.command}' en posición ${i + 1}`);
-    } else if (ACTION_COMMANDS.includes(cmd.command) && cmd.repetitions > 1) {
-      errors.push(`Error semántico: '${cmd.command}' no acepta parámetro de repetición (encontrado '${cmd.token || cmd.command}')`);
+    } else if (mapping.type === 'action' || mapping.type === 'camera') {
+      if (cmd.repetitions > 1) {
+         errors.push(`Error semántico: '${cmd.command}' no acepta parámetro de repetición (encontrado '${cmd.token || cmd.command}')`);
+      }
     }
   }
 
@@ -112,7 +103,5 @@ export function buildESP32Sequence(commands) {
 }
 
 export function getCommandInfo(command) {
-  return COMMAND_MAP[command] || null;
+  return tablaService.getCommandMeta(command);
 }
-
-export { COMMAND_MAP, MOVEMENT_COMMANDS, ACTION_COMMANDS };
