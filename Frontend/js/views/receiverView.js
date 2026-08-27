@@ -4,10 +4,7 @@ class ReceiverView {
     this.backendDown = false;
     this.listenersRegistered = false;
 
-    this.espUrlInput = document.getElementById('rx-esp-url');
-    this.connectBtn = document.getElementById('rx-connect-btn');
-    this.autodetectBtn = document.getElementById('rx-autodetect-btn');
-    this.disconnectBtn = document.getElementById('rx-disconnect-btn');
+    // Botones movidos al transmisor
     this.logConsole = document.getElementById('rx-log-console');
     this.statusEl = document.getElementById('rx-esp-status');
     this.auditBreakdown = document.getElementById('rx-audit-breakdown');
@@ -32,15 +29,7 @@ class ReceiverView {
   }
 
   bindEvents() {
-    // Fase 3: Deshabilitar conexión manual del carro — solo el transmisor lo controla
-    this.connectBtn.disabled = true;
-    this.connectBtn.title = 'Conexión controlada por el transmisor';
-    this.disconnectBtn.disabled = true;
-    this.disconnectBtn.title = 'Conexión controlada por el transmisor';
-    if (this.autodetectBtn) {
-      this.autodetectBtn.disabled = true;
-      this.autodetectBtn.title = 'Conexión controlada por el transmisor';
-    }
+    // Controles manuales del carro movidos al transmisor
 
     // #6: Receiver cannot initiate peer connections — only accepts incoming
     if (this.peerConnectBtn) {
@@ -166,115 +155,6 @@ class ReceiverView {
       this.addAuditLog('Carro desconectado', 'invalid');
     } else if (data.status === 'error') {
       this.addAuditLog('Error de conexión con el carro', 'invalid');
-    }
-  }
-
-  async connectToCar() {
-    const urlStr = this.espUrlInput.value.trim();
-
-    if (!urlStr) {
-      this.addAuditLog('Error: Ingrese la URL WebSocket del carro (ej: ws://10.23.212.225/ws)', 'invalid');
-      return;
-    }
-
-    let ip;
-    let port = 80;
-
-    try {
-      const url = new URL(urlStr);
-      if (!['ws:', 'wss:'].includes(url.protocol)) {
-        throw new Error('Protocolo inválido');
-      }
-      ip = url.hostname;
-      port = url.port ? parseInt(url.port, 10) : (url.protocol === 'wss:' ? 443 : 80);
-    } catch {
-      this.addAuditLog('Error: URL inválida. Formato esperado: ws://IP[:PUERTO]/ws', 'invalid');
-      return;
-    }
-
-    try {
-      this.addAuditLog(`Solicitando conexión al carro ${ip}:${port}...`, 'info');
-      const res = await this.client.request('connect', { ip, port });
-
-      if (!res.ok) {
-        this.addAuditLog('Error: ' + (res.data.error || 'Error del servidor'), 'invalid');
-        return;
-      }
-    } catch (err) {
-      this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
-    }
-  }
-
-  async autoDetectCar() {
-    if (this.autodetectBtn) this.autodetectBtn.disabled = true;
-    this.addAuditLog('Buscando simulador/carro en la red...', 'info');
-
-    const host = window.location.hostname || '127.0.0.1';
-    const candidates = [
-      'ws://127.0.0.1:8081/ws',
-      `ws://${host}:8081/ws`
-    ];
-    const uniqueCandidates = [...new Set(candidates)];
-
-    for (const url of uniqueCandidates) {
-      this.addAuditLog(`Probando ${url}...`, 'info');
-      const found = await this.probeWebSocket(url);
-      if (!found) continue;
-
-      this.addAuditLog(`Simulador/carro detectado en ${url}`, 'valid');
-      this.espUrlInput.value = url;
-      await this.connectToCar();
-      if (this.autodetectBtn) this.autodetectBtn.disabled = false;
-      return;
-    }
-
-    this.addAuditLog('No se encontró el simulador/carro. Verifique que esté encendido o ingrese la IP manualmente.', 'invalid');
-    if (this.autodetectBtn) this.autodetectBtn.disabled = false;
-  }
-
-  probeWebSocket(url, timeout = 1500) {
-    return new Promise((resolve) => {
-      let settled = false;
-      let ws;
-
-      try {
-        ws = new WebSocket(url);
-      } catch {
-        resolve(false);
-        return;
-      }
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { ws.close(); } catch { }
-        resolve(false);
-      }, timeout);
-
-      ws.onopen = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try { ws.close(); } catch { }
-        resolve(true);
-      };
-
-      ws.onerror = () => { };
-
-      ws.onclose = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(false);
-      };
-    });
-  }
-
-  async disconnectFromCar() {
-    try {
-      await this.client.request('disconnect', {});
-    } catch (err) {
-      this.addAuditLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
     }
   }
 

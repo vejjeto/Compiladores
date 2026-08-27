@@ -247,17 +247,67 @@ export class WsServerAdapter {
         this.logger.info(COMPONENT, `Comando remoto del peer: '${msg.command}'`);
 
         if (!this.ctx.carService.connected) {
-          ws.send(JSON.stringify({ type: 'command-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'command-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
+          }
           return;
         }
 
         const result = this.ctx.transmisorService.executeCommand(msg.command);
-        ws.send(JSON.stringify({
-          type: 'command-result',
-          ok: result.ok,
-          status: result.status,
-          data: result
-        }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'command-result',
+            ok: result.ok,
+            status: result.status,
+            data: result
+          }));
+        }
+        return;
+      }
+
+      if (msg.type === 'program') {
+        this.logger.info(COMPONENT, `Programa remoto del peer recibido`);
+        if (!this.ctx.carService.connected) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'program-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
+          }
+          return;
+        }
+        const result = this.ctx.transmisorService.executeProgram(msg.program);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'program-result', ok: result.ok, status: result.status, data: result }));
+        }
+        return;
+      }
+
+      if (msg.type === 'programa-numeros') {
+        this.logger.info(COMPONENT, `Programa de números remoto del peer recibido`);
+        if (!this.ctx.carService.connected) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'program-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
+          }
+          return;
+        }
+        const result = this.ctx.transmisorService.executeEncodedProgram(msg.programa);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'program-result', ok: result.ok, status: result.status, data: result }));
+        }
+        return;
+      }
+
+      if (msg.type === 'raw') {
+        this.logger.info(COMPONENT, `Carácter crudo remoto del peer recibido: '${msg.char}'`);
+        if (!this.ctx.carService.connected) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'raw-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
+          }
+          return;
+        }
+        const result = this.ctx.transmisorService.sendRawChar(msg.char);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'raw-result', ok: result.ok, status: result.status, data: result }));
+        }
+        return;
       }
     });
 

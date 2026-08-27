@@ -27,6 +27,10 @@ class TransmitterView {
     this.peerDisconnectBtn = document.getElementById('tx-peer-disconnect-btn');
     this.peerStatus = document.getElementById('tx-peer-status');
 
+    this.carUrlInput = document.getElementById('tx-esp-url');
+    this.carConnectBtn = document.getElementById('tx-connect-car-btn');
+    this.carDisconnectBtn = document.getElementById('tx-disconnect-car-btn');
+
     this.videoActive = false;
     this.cameraActive = false;
 
@@ -44,6 +48,9 @@ class TransmitterView {
 
     this.peerConnectBtn.addEventListener('click', () => this.connectPeer());
     this.peerDisconnectBtn.addEventListener('click', () => this.disconnectPeer());
+
+    if (this.carConnectBtn) this.carConnectBtn.addEventListener('click', () => this.connectCar());
+    if (this.carDisconnectBtn) this.carDisconnectBtn.addEventListener('click', () => this.disconnectCar());
 
     this.commandInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -155,7 +162,11 @@ class TransmitterView {
       if (peerConnected) {
         this.addLog('Programa inicia con N — pidiendo conexión de carro al receptor...', 'info');
         try {
-          await this.client.request('connect-car-peer', { ip: NetworkConfig.CAR_IP, port: NetworkConfig.CAR_PORT });
+          const rawUrl = this.carUrlInput ? this.carUrlInput.value.trim() : NetworkConfig.CAR_IP;
+          const match = rawUrl.match(/^(?:ws:\/\/)?([^:/]+)(?::(\d+))?(?:\/.*)?$/i);
+          const ip = match ? match[1] : rawUrl;
+          const port = match && match[2] ? parseInt(match[2], 10) : 80;
+          await this.client.request('connect-car-peer', { ip, port });
           await new Promise(r => setTimeout(r, 1500));
         } catch { /* ignore */ }
       }
@@ -204,6 +215,11 @@ class TransmitterView {
         return;
       }
 
+      if (res.status === 202) {
+        this.addLog(res.data.message || 'Enviado al receptor (Peer)', 'info');
+        return;
+      }
+
       this.activeSequenceId = res.data.sequenceId;
       this.addLog(`Enviado al Receptor: ${res.data.decoded.length} comandos encriptados, ${res.data.totalSteps} pasos`, 'info');
       this.addLog(`Secuencia ESP32: [${res.data.esp32Sequence.map(s => s.char).join(', ')}]`, 'command');
@@ -233,7 +249,11 @@ class TransmitterView {
       // Peer mode: tell receiver to connect to car first
       this.addLog('Pidiendo al receptor que conecte el carro...', 'info');
       try {
-        const connectRes = await this.client.request('connect-car-peer', { ip: NetworkConfig.CAR_IP, port: NetworkConfig.CAR_PORT });
+        const rawUrl = this.carUrlInput ? this.carUrlInput.value.trim() : NetworkConfig.CAR_IP;
+        const match = rawUrl.match(/^(?:ws:\/\/)?([^:/]+)(?::(\d+))?(?:\/.*)?$/i);
+        const ip = match ? match[1] : rawUrl;
+        const port = match && match[2] ? parseInt(match[2], 10) : 80;
+        const connectRes = await this.client.request('connect-car-peer', { ip, port });
         if (!connectRes.ok) {
           this.addLog(`Error: ${connectRes.data?.error || connectRes.error}`, 'invalid');
           return;
@@ -356,6 +376,71 @@ class TransmitterView {
       this.logConsole.removeChild(this.logConsole.firstChild);
     }
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
+  }
+
+  async connectCar() {
+    const rawUrl = this.carUrlInput ? this.carUrlInput.value.trim() : NetworkConfig.CAR_IP;
+    if (!rawUrl) {
+      this.addLog('IP o URL del carro vacía', 'invalid');
+      return;
+    }
+
+    let ip = rawUrl;
+    let port = 80;
+    
+    // Parse if it's a URL
+    const match = rawUrl.match(/^(?:ws:\/\/)?([^:/]+)(?::(\d+))?(?:\/.*)?$/i);
+    if (match) {
+      ip = match[1];
+      if (match[2]) port = parseInt(match[2], 10);
+    }
+
+    this.carConnectBtn.disabled = true;
+    this.addLog(`Solicitando conexión al carro (${ip}:${port})...`, 'info');
+
+    try {
+      // Si estamos conectados a un peer, la orden es 'connect-car-peer'. Si es local, es 'connect'.
+      let peerConnected = false;
+      try {
+        const peerRes = await this.client.request('peer-status');
+        peerConnected = peerRes.ok && peerRes.data?.connected;
+      } catch { }
+
+      const action = peerConnected ? 'connect-car-peer' : 'connect';
+      const res = await this.client.request(action, { ip, port });
+      
+      if (!res.ok) {
+        this.addLog(`Error conectando carro: ${res.data?.error || res.error}`, 'invalid');
+      } else {
+        this.addLog(peerConnected ? 'Orden de conectar enviada al Receptor' : 'Carro conectado localmente', 'valid');
+        this.carDisconnectBtn.disabled = false;
+      }
+    } catch (err) {
+      this.addLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
+    } finally {
+      this.carConnectBtn.disabled = false;
+    }
+  }
+
+  async disconnectCar() {
+    try {
+      let peerConnected = false;
+      try {
+        const peerRes = await this.client.request('peer-status');
+        peerConnected = peerRes.ok && peerRes.data?.connected;
+      } catch { }
+
+      // En la arquitectura actual, desconectar localmente y luego decir al peer que desconecte
+      if (!peerConnected) {
+        await this.client.request('disconnect', {});
+        this.addLog('Carro desconectado', 'info');
+      } else {
+        this.addLog('El Receptor desconectará automáticamente o usa comando M', 'warn');
+      }
+      if (this.carDisconnectBtn) this.carDisconnectBtn.disabled = true;
+    } catch (err) {
+      this.addLog(`Error: ${err.message}`, 'invalid');
+    }
   }
 
   async connectPeer() {

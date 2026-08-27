@@ -135,9 +135,8 @@ class App {
     clickBtn('tx-execute-btn');
     clickBtn('tx-clear-btn');
     clickBtn('tx-clear-logs-btn');
-    clickBtn('rx-connect-btn');
-    clickBtn('rx-disconnect-btn');
-    clickBtn('rx-autodetect-btn');
+    clickBtn('tx-connect-car-btn');
+    clickBtn('tx-disconnect-car-btn');
     clickBtn('rx-clear-logs-btn');
     clickBtn('rx-verify-btn');
     clickBtn('backend-url-apply');

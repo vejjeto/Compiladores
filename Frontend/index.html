@@ -62,6 +62,21 @@
           <div class="peer-status" id="tx-peer-status">Sin conexión peer</div>
         </div>
         <div class="form-group">
+          <label>URL / IP del carro físico</label>
+          <input
+            type="text"
+            class="form-input"
+            id="tx-esp-url"
+            placeholder="192.168.0.50"
+            value="192.168.0.50"
+            spellcheck="false"
+          >
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="tx-connect-car-btn">Conectar Carro</button>
+          <button class="btn btn-danger" id="tx-disconnect-car-btn" disabled>Desconectar</button>
+        </div>
+        <div class="form-group" style="margin-top: 15px;">
           <label>Programa de comandos</label>
           <textarea
             class="form-input"
@@ -139,22 +154,7 @@
           </div>
           <div class="peer-status" id="rx-peer-status">Sin conexión peer</div>
         </div>
-        <div class="form-group">
-          <label>URL WebSocket del carro</label>
-          <input
-            type="text"
-            class="form-input"
-            id="rx-esp-url"
-            placeholder="ws://10.23.212.225/ws"
-            value="ws://10.23.212.225/ws"
-            spellcheck="false"
-          >
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="rx-connect-btn">Conectar Carro</button>
-          <button class="btn btn-ghost" id="rx-autodetect-btn">Auto-Detect</button>
-          <button class="btn btn-danger" id="rx-disconnect-btn">Desconectar</button>
-        </div>
+
 
         <div class="form-group">
           <label>Verificar Número</label>
