@@ -217,24 +217,22 @@ async function connectPeer(ctx, body) {
     return {
       ok: false,
       status: 400,
-      data: { ok: false, error: 'La URL del peer es obligatoria (ej: ws://192.168.0.51:3000/ws/peer)' },
-      error: 'La URL del peer es obligatoria'
+      data: { ok: false, error: 'La URL del receptor es obligatoria (ej: ws://192.168.0.51:3000/ws)' },
+      error: 'La URL del receptor es obligatoria'
     };
   }
 
   // Validate URL format
-  try {
-    new URL(url);
-  } catch {
+  if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
     return {
       ok: false,
       status: 400,
-      data: { ok: false, error: 'URL inválida. Usá el formato: ws://IP:PUERTO/ws/peer' },
+      data: { ok: false, error: 'URL inválida. Usá el formato: ws://IP:PUERTO/ws' },
       error: 'URL inválida'
     };
   }
 
-  // Pure WebSocket — no HTTP fallback
+  // Pure WebSocket connection
   try {
     const result = await ctx.peerAdapter.connect(url);
     return { ok: true, status: 200, data: result, error: null };
@@ -242,7 +240,7 @@ async function connectPeer(ctx, body) {
     return {
       ok: false,
       status: 502,
-      data: { ok: false, error: `Error conectando al peer: ${err.message}` },
+      data: { ok: false, error: `Error conectando al receptor: ${err.message}` },
       error: err.message
     };
   }

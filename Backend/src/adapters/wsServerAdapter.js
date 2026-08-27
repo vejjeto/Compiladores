@@ -47,7 +47,7 @@ export class WsServerAdapter {
 
     this.server.on('upgrade', (req, socket, head) => {
       const url = new URL(req.url, 'http://localhost');
-      if (url.pathname === '/ws/peer') {
+      if (url.pathname === '/ws' || url.pathname === '/ws/peer' || url.pathname === '/transmisor') {
         this.peerWss.handleUpgrade(req, socket, head, (ws) => {
           this.peerWss.emit('connection', ws, req);
         });
@@ -63,8 +63,8 @@ export class WsServerAdapter {
     this.heartbeat = setInterval(() => this._heartbeat(), HEARTBEAT_MS);
     this.heartbeat.unref();
 
-    this.logger.info(COMPONENT, 'Servidor WebSocket listo en /ws/api');
-    this.logger.info(COMPONENT, 'Servidor Peer WebSocket listo en /ws/peer');
+    this.logger.info(COMPONENT, 'Servidor WebSocket API listo en /ws/api');
+    this.logger.info(COMPONENT, 'Servidor WebSocket Receptor listo en /ws (y compatible con /transmisor y /ws/peer)');
   }
 
   _heartbeat() {

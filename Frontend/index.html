@@ -47,19 +47,19 @@
       </div>
       <div class="panel-body">
         <div class="peer-section">
-          <label>Conexión Peer (otro backend)</label>
+          <label>Conexión con Receptor Remoto (WebSocket)</label>
           <div class="btn-group">
             <input
               type="text"
               class="form-input"
               id="tx-peer-url"
-              placeholder="ws://192.168.0.XX:3000/ws/peer"
+              placeholder="ws://192.168.0.XX:3000/ws"
               spellcheck="false"
             >
-            <button class="btn btn-primary" id="tx-peer-connect-btn">Conectar Peer</button>
+            <button class="btn btn-primary" id="tx-peer-connect-btn">Conectar Receptor</button>
             <button class="btn btn-danger" id="tx-peer-disconnect-btn" disabled>Desconectar</button>
           </div>
-          <div class="peer-status" id="tx-peer-status">Sin conexión peer</div>
+          <div class="peer-status" id="tx-peer-status">Sin conexión remota (Modo Local)</div>
         </div>
         <div class="form-group">
           <label>URL / IP del carro físico</label>
@@ -139,23 +139,6 @@
         <div class="pc-ip-display" id="rx-pc-ip">PC: ---</div>
       </div>
       <div class="panel-body">
-        <div class="peer-section">
-          <label>Conexión Peer (otro backend)</label>
-          <div class="btn-group">
-            <input
-              type="text"
-              class="form-input"
-              id="rx-peer-url"
-              placeholder="ws://192.168.0.XX:3000/ws/peer"
-              spellcheck="false"
-            >
-            <button class="btn btn-primary" id="rx-peer-connect-btn">Conectar Peer</button>
-            <button class="btn btn-danger" id="rx-peer-disconnect-btn" disabled>Desconectar</button>
-          </div>
-          <div class="peer-status" id="rx-peer-status">Sin conexión peer</div>
-        </div>
-
-
         <div class="form-group">
           <label>Verificar Número</label>
           <div class="btn-group">

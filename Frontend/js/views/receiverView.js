@@ -13,11 +13,6 @@ class ReceiverView {
     this.verifyBtn = document.getElementById('rx-verify-btn');
     this.pcIpDisplay = document.getElementById('rx-pc-ip');
 
-    this.peerUrlInput = document.getElementById('rx-peer-url');
-    this.peerConnectBtn = document.getElementById('rx-peer-connect-btn');
-    this.peerDisconnectBtn = document.getElementById('rx-peer-disconnect-btn');
-    this.peerStatus = document.getElementById('rx-peer-status');
-
     this.PRIMES = [41, 43, 47, 53, 59, 61];
     this.currentLine = [];
     this.lastEspState = null;
@@ -28,16 +23,6 @@ class ReceiverView {
   }
 
   bindEvents() {
-    // #6: Receiver cannot initiate peer connections — only accepts incoming
-    if (this.peerConnectBtn) {
-      this.peerConnectBtn.disabled = true;
-      this.peerConnectBtn.title = 'El receptor solo acepta conexiones entrantes del transmisor';
-    }
-    if (this.peerDisconnectBtn) {
-      this.peerDisconnectBtn.disabled = true;
-      this.peerDisconnectBtn.title = 'El receptor solo acepta conexiones entrantes del transmisor';
-    }
-
     this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
 
     if (this.verifyBtn) {

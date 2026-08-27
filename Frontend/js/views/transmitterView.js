@@ -448,7 +448,7 @@ class TransmitterView {
   async connectPeer() {
     const url = this.peerUrlInput.value.trim();
     if (!url) {
-      this.addLog('Ingresá la URL del peer (ej: ws://192.168.0.XX:3000/ws/peer)', 'invalid');
+      this.addLog('Ingresá la URL del receptor (ej: ws://192.168.0.XX:3000/ws)', 'invalid');
       return;
     }
 
@@ -457,12 +457,8 @@ class TransmitterView {
       this.addLog('URL inválida. Debe empezar con ws:// o wss://', 'invalid');
       return;
     }
-    if (!url.includes('/ws/peer')) {
-      this.addLog('URL inválida. Debe terminar en /ws/peer (ej: ws://IP:3000/ws/peer)', 'invalid');
-      return;
-    }
 
-    this.addLog(`Conectando al peer: ${url}`, 'info');
+    this.addLog(`Conectando al receptor remoto: ${url}`, 'info');
     this.peerConnectBtn.disabled = true;
     this.peerStatus.textContent = 'Conectando...';
 
@@ -473,13 +469,13 @@ class TransmitterView {
         this.peerStatus.className = 'peer-status peer-connected';
         this.peerConnectBtn.disabled = true;
         this.peerDisconnectBtn.disabled = false;
-        this.addLog(`Peer conectado: ${res.data.address}`, 'valid');
+        this.addLog(`Receptor remoto conectado: ${res.data.address}`, 'valid');
       } else {
         const errorMsg = res.data?.error || res.error || 'Error desconocido';
         this.peerStatus.textContent = 'Error de conexión';
         this.peerStatus.className = 'peer-status peer-error';
         this.peerConnectBtn.disabled = false;
-        this.addLog(`Error conectando peer: ${errorMsg}`, 'invalid');
+        this.addLog(`Error conectando al receptor: ${errorMsg}`, 'invalid');
       }
     } catch (err) {
       this.peerStatus.textContent = 'Error de conexión';
@@ -498,13 +494,13 @@ class TransmitterView {
   async disconnectPeer() {
     try {
       await this.client.request('disconnect-peer');
-      this.peerStatus.textContent = 'Sin conexión peer';
+      this.peerStatus.textContent = 'Sin conexión remota (Modo Local)';
       this.peerStatus.className = 'peer-status';
       this.peerConnectBtn.disabled = false;
       this.peerDisconnectBtn.disabled = true;
-      this.addLog('Peer desconectado', 'warn');
+      this.addLog('Desconectado del receptor remoto', 'warn');
     } catch (err) {
-      this.addLog(`Error desconectando peer: ${err.message}`, 'invalid');
+      this.addLog(`Error desconectando receptor: ${err.message}`, 'invalid');
     }
   }
 
