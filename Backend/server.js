@@ -1,7 +1,9 @@
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { tablaService } from './src/services/tablaService.js';
 import os from 'os';
-import { pathToFileURL } from 'url';
 import { info, warn, error, success } from './src/utils/logger.js';
 import logger from './src/utils/logger.js';
 import { CarService } from './src/services/carService.js';
@@ -15,6 +17,22 @@ import { PeerAdapter } from './src/adapters/peerAdapter.js';
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 3000;
 const DEFAULT_STEP_DELAY = 350;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const FRONTEND_PATH = path.join(__dirname, '../Frontend');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon'
+};
 
 function getLocalIpv4Addresses() {
   const ifaces = os.networkInterfaces();
@@ -37,9 +55,9 @@ function printAccessUrls() {
 
   console.log('');
   console.log(separator);
-  console.log(' ACCESS URLs');
+  console.log(' ACCESS URLs (Frontend + API unificados)');
   console.log(separator);
-  console.log(` Frontend : http://${displayIp}:${frontendPort}`);
+  console.log(` Web App  : http://${displayIp}:${PORT}`);
   console.log(` API      : http://${displayIp}:${PORT}`);
   console.log(` Health   : http://${displayIp}:${PORT}/api/health`);
   console.log(` Local IPs: ${ips.join(', ')}`);
@@ -168,27 +186,27 @@ async function handleRequest(req, res, ctx) {
   }
 
   const url = new URL(req.url, 'http://localhost');
-  const path = url.pathname;
+  const reqPath = url.pathname;
   const method = req.method;
 
   try {
-    if (method === 'GET' && path === '/api/health') {
+    if (method === 'GET' && reqPath === '/api/health') {
       return respondResult(res, await HANDLERS.health(ctx, {}));
     }
 
-    if (method === 'GET' && path === '/api/peer-status') {
+    if (method === 'GET' && reqPath === '/api/peer-status') {
       return respondResult(res, await HANDLERS['peer-status'](ctx, {}));
     }
 
-    if (method === 'GET' && path === '/api/audit') {
+    if (method === 'GET' && reqPath === '/api/audit') {
       return respondResult(res, await HANDLERS.audit(ctx, {}));
     }
 
-    if (method === 'GET' && path === '/api/rangos') {
+    if (method === 'GET' && reqPath === '/api/rangos') {
       return respondResult(res, await HANDLERS.rangos(ctx, {}));
     }
 
-    if (method === 'GET' && path === '/api/comandos') {
+    if (method === 'GET' && reqPath === '/api/comandos') {
       const commandsObj = tablaService.getAllCommands();
       const comandos = Object.entries(commandsObj).map(([cmd, info]) => ({
         comando: cmd,
@@ -207,11 +225,11 @@ async function handleRequest(req, res, ctx) {
       });
     }
 
-    if (method === 'GET' && path === '/api/events') {
+    if (method === 'GET' && reqPath === '/api/events') {
       return handleEvents(res, ctx.auditService);
     }
 
-    if (method === 'GET' && path === '/api/grafo') {
+    if (method === 'GET' && reqPath === '/api/grafo') {
       const numero = parseInt(url.searchParams.get('numero'), 10);
       const primo = parseInt(url.searchParams.get('primo'), 10);
       
@@ -248,11 +266,51 @@ async function handleRequest(req, res, ctx) {
         '/api/connect-car-peer': HANDLERS['connect-car-peer']
       };
 
-      const handler = routeHandlers[path];
+      const handler = routeHandlers[reqPath];
 
       if (handler) {
         return respondResult(res, await handler(ctx, body));
       }
+    }
+
+    // Si no es API ni WS, servimos el Frontend estático
+    if (!reqPath.startsWith('/api/') && !reqPath.startsWith('/ws/')) {
+      let filePath = reqPath === '/' ? '/index.html' : reqPath;
+      filePath = path.join(FRONTEND_PATH, filePath);
+
+      const resolvedPath = path.resolve(filePath);
+      const rootPath = path.resolve(FRONTEND_PATH);
+      if (!resolvedPath.startsWith(rootPath + path.sep) && resolvedPath !== rootPath) {
+        res.writeHead(403);
+        res.end('Acceso denegado');
+        return;
+      }
+
+      const ext = path.extname(filePath);
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          if (err.code === 'ENOENT') {
+            fs.readFile(path.join(FRONTEND_PATH, 'index.html'), (e, d) => {
+              if (e) {
+                res.writeHead(500);
+                res.end('Error del servidor');
+                return;
+              }
+              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+              res.end(d);
+            });
+          } else {
+            res.writeHead(500);
+            res.end('Error del servidor');
+          }
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(data);
+      });
+      return;
     }
 
     return respond(res, 404, { ok: false, error: 'Ruta no encontrada' });

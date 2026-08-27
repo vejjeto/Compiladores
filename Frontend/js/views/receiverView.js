@@ -4,7 +4,6 @@ class ReceiverView {
     this.backendDown = false;
     this.listenersRegistered = false;
 
-    // Botones movidos al transmisor
     this.logConsole = document.getElementById('rx-log-console');
     this.statusEl = document.getElementById('rx-esp-status');
     this.auditBreakdown = document.getElementById('rx-audit-breakdown');
@@ -29,8 +28,6 @@ class ReceiverView {
   }
 
   bindEvents() {
-    // Controles manuales del carro movidos al transmisor
-
     // #6: Receiver cannot initiate peer connections — only accepts incoming
     if (this.peerConnectBtn) {
       this.peerConnectBtn.disabled = true;

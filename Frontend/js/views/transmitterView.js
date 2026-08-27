@@ -430,12 +430,14 @@ class TransmitterView {
         peerConnected = peerRes.ok && peerRes.data?.connected;
       } catch { }
 
-      // En la arquitectura actual, desconectar localmente y luego decir al peer que desconecte
       if (!peerConnected) {
         await this.client.request('disconnect', {});
-        this.addLog('Carro desconectado', 'info');
+        this.addLog('Carro desconectado (Local)', 'info');
       } else {
-        this.addLog('El Receptor desconectará automáticamente o usa comando M', 'warn');
+        // Para desconectar el carro remotamente, enviamos el comando M (Liberar Control)
+        this.addLog('Enviando orden remota (M) para liberar el control del carro...', 'info');
+        await this.client.request('command', { command: 'M' });
+        this.addLog('Control remoto liberado', 'valid');
       }
       if (this.carDisconnectBtn) this.carDisconnectBtn.disabled = true;
     } catch (err) {

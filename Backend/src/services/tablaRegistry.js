@@ -1,20 +1,10 @@
-import { 
-  JsonTablaAdapter, 
-  ArrayTablaAdapter, 
-  CsvTablaAdapter, 
-  PlanaTablaAdapter, 
-  ExternaTablaAdapter 
-} from './tablaAdapter.js';
+import { JsonTablaAdapter } from './tablaAdapter.js';
 
 class TablaRegistry {
   constructor() {
     this.adapters = new Map();
-    // Registrar los adaptadores por defecto
+    // Registrar el adaptador por defecto
     this.register('json', new JsonTablaAdapter());
-    this.register('array', new ArrayTablaAdapter());
-    this.register('csv', new CsvTablaAdapter());
-    this.register('plana', new PlanaTablaAdapter());
-    this.register('externa', new ExternaTablaAdapter());
   }
 
   register(format, adapterInstance) {
