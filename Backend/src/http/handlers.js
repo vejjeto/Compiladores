@@ -217,7 +217,7 @@ async function connectPeer(ctx, body) {
     return {
       ok: false,
       status: 400,
-      data: { ok: false, error: 'La URL del receptor es obligatoria (ej: ws://192.168.0.51:3000/ws)' },
+      data: { ok: false, error: 'La URL del receptor es obligatoria (ej: ws://192.168.0.51/ws)' },
       error: 'La URL del receptor es obligatoria'
     };
   }

@@ -2,7 +2,7 @@
 title Sistema de Control Robótico
 echo ========================================
 echo   SISTEMA DE CONTROL ROBOTICO
-echo   Backend (Puerto 3000)
+echo   Backend (Puerto 80 por defecto)
 echo ========================================
 echo.
 echo Instalando dependencias...
@@ -12,6 +12,6 @@ call npm install --prefix simulador
 call npm install
 echo.
 echo Iniciando servidores...
-echo   Aplicación disponible en: http://localhost:3000
+echo   Aplicación disponible en: http://localhost
 echo.
 call npx concurrently "npm start --prefix Backend" "npm start --prefix simulador"

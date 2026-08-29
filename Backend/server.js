@@ -15,7 +15,7 @@ import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
 import { PeerAdapter } from './src/adapters/peerAdapter.js';
 
 const COMPONENT = 'SERVER';
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 80;
 const DEFAULT_STEP_DELAY = 350;
 
 const __filename = fileURLToPath(import.meta.url);

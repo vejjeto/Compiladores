@@ -23,7 +23,10 @@ class App {
   }
 
   inferBackendUrl() {
-    return `${window.location.protocol}//${window.location.hostname}:3000`;
+    if (window.location.origin && window.location.origin !== 'null') {
+      return window.location.origin;
+    }
+    return `${window.location.protocol}//${window.location.hostname}`;
   }
 
   normalizeBackendUrl(raw) {
@@ -79,8 +82,8 @@ class App {
   applyBackendUrl() {
     const value = this.normalizeBackendUrl(this.backendInput.value);
     if (!value) {
-      this.transmitterView.addLog('URL de backend inválida. Usá el formato http://IP:3000', 'invalid');
-      this.receiverView.addAuditLog('URL de backend inválida. Usá el formato http://IP:3000', 'invalid');
+      this.transmitterView.addLog('URL de backend inválida. Usá el formato http://IP (ej: http://192.168.0.XX)', 'invalid');
+      this.receiverView.addAuditLog('URL de backend inválida. Usá el formato http://IP (ej: http://192.168.0.XX)', 'invalid');
       return;
     }
     this.backendUrl = value;

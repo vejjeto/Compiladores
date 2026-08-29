@@ -448,7 +448,7 @@ class TransmitterView {
   async connectPeer() {
     const url = this.peerUrlInput.value.trim();
     if (!url) {
-      this.addLog('Ingresá la URL del receptor (ej: ws://192.168.0.XX:3000/ws)', 'invalid');
+      this.addLog('Ingresá la URL del receptor (ej: ws://192.168.0.XX/ws)', 'invalid');
       return;
     }
 
@@ -482,7 +482,7 @@ class TransmitterView {
       this.peerStatus.className = 'peer-status peer-error';
       this.peerConnectBtn.disabled = false;
       if (err.message === 'Timeout') {
-        this.addLog('Timeout: tu backend no respondió. Verificá que esté corriendo en localhost:3000', 'invalid');
+        this.addLog('Timeout: tu backend no respondió. Verificá que esté corriendo en localhost', 'invalid');
       } else if (err.message === 'WS no disponible') {
         this.addLog('Tu backend no está conectado. Recargá la página (F5) y verificá que el backend esté corriendo', 'invalid');
       } else {
