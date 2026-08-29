@@ -55,6 +55,10 @@ class ReceiverView {
       this.handleCarStatus(data);
     } else if (type === 'CAR_MESSAGE') {
       this._handleCarMessage(data.message);
+    } else if (type === 'TRANSMITTER_CONNECTED') {
+      this.addAuditLog(`Transmisor remoto conectado desde IP: ${data.ip}`, 'valid');
+    } else if (type === 'TRANSMITTER_DISCONNECTED') {
+      this.addAuditLog(`Transmisor remoto desconectado (${data.ip})`, 'warn');
     }
   }
 

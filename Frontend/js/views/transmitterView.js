@@ -469,7 +469,7 @@ class TransmitterView {
         this.peerStatus.className = 'peer-status peer-connected';
         this.peerConnectBtn.disabled = true;
         this.peerDisconnectBtn.disabled = false;
-        this.addLog(`Receptor remoto conectado: ${res.data.address}`, 'valid');
+        this.addLog(`Conectado con el dispositivo: ${res.data.address}`, 'valid');
       } else {
         const errorMsg = res.data?.error || res.error || 'Error desconocido';
         this.peerStatus.textContent = 'Error de conexión';

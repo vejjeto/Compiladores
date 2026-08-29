@@ -184,9 +184,15 @@ export class WsServerAdapter {
   }
 
   _handlePeerConnection(ws) {
-    const clientIp = ws._socket?.remoteAddress || 'desconocida';
-    this.logger.info(COMPONENT, `Peer conectado desde ${clientIp}`);
+    const rawIp = ws._socket?.remoteAddress || 'desconocida';
+    const clientIp = rawIp.replace(/^::ffff:/, '');
+    this.logger.info(COMPONENT, `Transmisor conectado desde ${clientIp}`);
     this.peerConnections.add(ws);
+
+    this.ctx.auditService.broadcast('TRANSMITTER_CONNECTED', {
+      ip: clientIp,
+      timestamp: new Date().toISOString()
+    });
 
     // Forward car events to this peer
     const unsubAudit = this.ctx.auditService.subscribe(({ type, data }) => {
@@ -315,7 +321,12 @@ export class WsServerAdapter {
       this.peerConnections.delete(ws);
       this.ctx.carService.removeListener('message', onCarMessage);
       unsubAudit();
-      this.logger.info(COMPONENT, `Peer desconectado: ${clientIp}`);
+      this.logger.info(COMPONENT, `Transmisor desconectado: ${clientIp}`);
+
+      this.ctx.auditService.broadcast('TRANSMITTER_DISCONNECTED', {
+        ip: clientIp,
+        timestamp: new Date().toISOString()
+      });
     });
 
     ws.on('error', () => {
