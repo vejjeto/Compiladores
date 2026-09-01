@@ -1,4 +1,7 @@
 import { WsCarAdapter } from '../adapters/wsCarAdapter.js';
+import logger from '../utils/logger.js';
+
+const COMPONENT = 'CARRO';
 
 export class CarService extends WsCarAdapter {
   constructor() {
@@ -16,14 +19,14 @@ export class CarService extends WsCarAdapter {
           const parsed = JSON.parse(msg);
           if (parsed && parsed.v === 1 && parsed.ack === true) {
             this.setDialect('json');
-            console.log('[CARRO] Auto-detectado: protocolo JSON v1');
+            logger.info(COMPONENT, 'Auto-detectado: protocolo JSON v1');
           }
         } catch {
           // No es JSON válido, mantener legacy
         }
       } else if (msg.startsWith('C.E ') || msg.startsWith('ACK:')) {
         this.setDialect('legacy');
-        console.log('[CARRO] Auto-detectado: protocolo legacy (' + msg.slice(0, 3) + ')');
+        logger.info(COMPONENT, 'Auto-detectado: protocolo legacy (' + msg.slice(0, 3) + ')');
       }
     }
     super._handleIncoming(message);
