@@ -97,22 +97,36 @@
           </div>
         </div>
 
-        <div class="camera-controls" id="tx-camera-controls">
-          <label>Cámara</label>
-          <div class="btn-group">
-            <button class="btn btn-success" id="tx-camera-on-btn">Encender</button>
-            <button class="btn btn-danger" id="tx-camera-off-btn">Apagar</button>
+        <div class="form-group" style="margin-top: 15px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="margin: 0;">📹 Cámara ESP32 (Stream en Vivo)</label>
+            <span class="camera-status" id="tx-camera-status">Apagada</span>
           </div>
-          <span class="camera-status" id="tx-camera-status">Apagada</span>
-        </div>
 
-        <div class="video-container" id="tx-video-container">
-          <img id="tx-video-player" alt="Stream de cámara">
-          <div class="video-placeholder" id="tx-video-placeholder">
-            <span class="icon">&#9655;</span>
-            <span>Presioná "Encender" para iniciar stream</span>
+          <div class="btn-group" style="margin-bottom: 8px;">
+            <input
+              type="text"
+              class="form-input"
+              id="tx-camera-url-input"
+              value="http://192.168.0.51"
+              placeholder="http://192.168.0.51"
+              spellcheck="false"
+              style="flex: 1;"
+            >
+            <button class="btn btn-secondary" id="tx-cam-refresh-btn" title="Recargar stream de video">🔄</button>
+            <button class="btn btn-secondary" id="tx-cam-fullscreen-btn" title="Pantalla completa">⛶</button>
+            <button class="btn btn-secondary" id="tx-cam-popout-btn" title="Abrir en pestaña nueva">🔗</button>
+            <button class="btn btn-success" id="tx-camera-on-btn">Encender</button>
+            <button class="btn btn-danger" id="tx-camera-off-btn" disabled>Apagar</button>
           </div>
-          <div class="video-overlay hidden" id="tx-video-overlay">LIVE</div>
+          <div class="video-container" id="tx-video-container">
+            <img id="tx-video-player" alt="Stream de cámara">
+            <div class="video-placeholder" id="tx-video-placeholder">
+              <span class="icon">&#9655;</span>
+              <span>Conecta el carro o presiona "Encender" para ver el video</span>
+            </div>
+            <div class="video-overlay hidden" id="tx-video-overlay">LIVE 🔴</div>
+          </div>
         </div>
       </div>
     </div>

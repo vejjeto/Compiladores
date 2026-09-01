@@ -27,7 +27,11 @@ class BackendClient {
       command: { path: '/api/command', method: 'POST' },
       raw: { path: '/api/raw', method: 'POST' },
       classify: { path: '/api/classify', method: 'POST' },
-      audit: { path: '/api/audit', method: 'GET' }
+      audit: { path: '/api/audit', method: 'GET' },
+      'connect-peer': { path: '/api/connect-peer', method: 'POST' },
+      'disconnect-peer': { path: '/api/disconnect-peer', method: 'POST' },
+      'peer-status': { path: '/api/peer-status', method: 'GET' },
+      'connect-car-peer': { path: '/api/connect-car-peer', method: 'POST' }
     };
     this.EVENT_NAMES = ['AUDIT_LOG', 'CAR_STATUS', 'CAR_MESSAGE', 'SEQUENCE_STARTED', 'STEP_SENT', 'SEQUENCE_COMPLETED', 'SEQUENCE_ERROR', 'STEP_RETRY'];
   }

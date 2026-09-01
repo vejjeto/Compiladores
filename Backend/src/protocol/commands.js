@@ -61,6 +61,11 @@ export function parseMessage(payload) {
     return { kind: 'legacy', data: { ack: true, cmd: payload.slice(4) } };
   }
 
+  // Formato del firmware de referencia: "C.E F" (con espacio)
+  if (payload.startsWith('C.E ')) {
+    return { kind: 'legacy', data: { ack: true, cmd: payload.slice(4) } };
+  }
+
   return { kind: 'unknown', data: null };
 }
 

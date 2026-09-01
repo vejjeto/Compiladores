@@ -696,7 +696,11 @@ textarea.form-input {
 
 .video-container video,
 .video-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   display: none;
+  z-index: 1;
 }
 
 .video-placeholder {
@@ -712,6 +716,10 @@ textarea.form-input {
   text-transform: uppercase;
 }
 
+.video-placeholder.hidden {
+  display: none;
+}
+
 .video-placeholder .icon {
   font-size: 2rem;
   color: var(--phosphor-muted);
@@ -720,6 +728,22 @@ textarea.form-input {
 }
 
 .video-overlay {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  background: rgba(255, 51, 51, 0.85);
+  color: white;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-caption);
+  font-weight: bold;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  z-index: 2;
+  box-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+}
+
+.video-overlay.hidden {
   display: none;
 }
 

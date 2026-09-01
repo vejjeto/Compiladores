@@ -34,7 +34,8 @@ describe('Encriptador - COMMAND_RANGE', () => {
   it('getCommandByRange identifica el comando por el rango', () => {
     assert.strictEqual(getCommandByRange(1025).esp32, 'F');
     assert.strictEqual(getCommandByRange(2999).esp32, 'B');
-    assert.strictEqual(getCommandByRange(5000).esp32, 'O');
+    assert.strictEqual(getCommandByRange(5000).esp32, 'N');
+    assert.strictEqual(getCommandByRange(7000).esp32, 'O');
     assert.strictEqual(getCommandByRange(9999).esp32, 'M');
     assert.strictEqual(getCommandByRange(1), null);
     assert.strictEqual(getCommandByRange(10000), null);

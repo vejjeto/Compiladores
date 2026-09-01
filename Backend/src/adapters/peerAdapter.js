@@ -30,6 +30,7 @@ export class PeerAdapter {
       this.disconnect();
     }
 
+    this.url = url;
     this.role = role;
     this.isGitlabCompat = url.endsWith('/transmisor');
 
@@ -43,7 +44,7 @@ export class PeerAdapter {
         if (!settled) {
           settled = true;
           ws.terminate();
-          reject(new Error('Timeout conectando al peer'));
+          reject(new Error('No se pudo conectar al receptor (Timeout: IP no responde o servidor apagado)'));
         }
       }, CONNECT_TIMEOUT);
 
@@ -77,6 +78,7 @@ export class PeerAdapter {
           this.ws = null;
           this.ip = null;
           this.port = null;
+          this.url = null;
           logger.warn(COMPONENT, 'Peer desconectado');
           this._notifyListeners({ type: 'peer-disconnected' });
         }
@@ -100,17 +102,18 @@ export class PeerAdapter {
       try { ws.close(); } catch {}
       this.ip = null;
       this.port = null;
+      this.url = null;
       this.role = null;
       logger.warn(COMPONENT, 'Desconectando peer');
       this._notifyListeners({ type: 'peer-disconnected' });
     }
   }
 
-  sendCommand(command, repetitions) {
+  sendCommand(command, repetitions = 1) {
     if (!this.connected) throw new Error('No hay conexión con el peer');
     if (this.isGitlabCompat) {
-      const { numeroUnico } = codificarPrograma([{ command, repetitions: repetitions || 1 }]);
-      this.ws.send(numeroUnico);
+      const { numeroUnico } = codificarPrograma([{ command, repetitions }]);
+      if (numeroUnico) this.ws.send(numeroUnico);
     } else {
       this.ws.send(JSON.stringify({ type: 'command', command, repetitions }));
     }
@@ -149,13 +152,28 @@ export class PeerAdapter {
     }
   }
 
-  sendConnectCar(ip, port) {
+  async sendConnectCar(ip, port) {
     if (!this.connected) throw new Error('No hay conexión con el peer');
-    if (this.isGitlabCompat) {
-      // El proyecto de GitLab ignora esto o usa POST /robot
-      logger.warn(COMPONENT, 'sendConnectCar ignorado en modo GitLab (usa POST /robot directo al receptor)');
-    } else {
+    
+    // 1. Mensaje WS para receptores con protocolo JSON
+    try {
       this.ws.send(JSON.stringify({ type: 'connect-car', ip, port }));
+    } catch {}
+
+    // 2. Petición HTTP POST /robot para receptores con protocolo GitLab / Andrés Cuello
+    try {
+      const httpProto = this.url && this.url.startsWith('wss://') ? 'https' : 'http';
+      const robotUrl = `ws://${ip}:${port || 80}/ws`;
+      const postUrl = `${httpProto}://${this.ip}:${this.port || 80}/robot`;
+      
+      await fetch(postUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: robotUrl })
+      });
+      logger.info(COMPONENT, `Orden POST /robot enviada a ${postUrl} (robotUrl: ${robotUrl})`);
+    } catch (err) {
+      logger.warn(COMPONENT, `Aviso enviando POST /robot: ${err.message}`);
     }
   }
 
@@ -188,6 +206,22 @@ export class PeerAdapter {
   async _handleMessage(raw) {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+
+    if (msg.tipo === 'progreso') {
+      this._notifyListeners({ type: 'peer-progreso', fase: msg.fase, comando: msg.comando, detalle: msg });
+      if (this.ctx.auditService) {
+        this.ctx.auditService.broadcast('PEER_PROGRESS', { fase: msg.fase, comando: msg.comando, detalle: msg });
+      }
+      return;
+    }
+
+    if (msg.estado) {
+      this._notifyListeners({ type: 'peer-program-result', estado: msg.estado, comando: msg.comando, motivo: msg.motivo });
+      if (this.ctx.auditService) {
+        this.ctx.auditService.broadcast('PEER_PROGRAM_RESULT', { estado: msg.estado, comando: msg.comando, motivo: msg.motivo });
+      }
+      return;
+    }
 
     switch (msg.type) {
       case 'command':

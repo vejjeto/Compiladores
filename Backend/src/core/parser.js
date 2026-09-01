@@ -4,11 +4,17 @@ const COMMAND_REGEX = /^([A-Z])(?::([1-9]))?$/;
 
 export function parseCommands(inputString) {
   const errors = [];
-  const raw = (inputString || '').trim();
+  let raw = (inputString || '').trim();
 
   if (!raw) {
     return { valid: false, errors: ['El programa está vacío'], commands: [], raw };
   }
+
+  // Normalizar separadores: aceptar coma, punto y coma, o espacios
+  raw = raw.replace(/;/g, ',').replace(/\s+/g, ',');
+
+  // Limpiar comas múltiples
+  raw = raw.replace(/,+/g, ',').replace(/^,|,$/g, '');
 
   const tokens = raw.split(',').map(t => t.trim()).filter(t => t.length > 0);
   const commands = [];

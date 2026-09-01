@@ -22,6 +22,12 @@ class TransmitterView {
     this.cameraOffBtn = document.getElementById('tx-camera-off-btn');
     this.cameraStatus = document.getElementById('tx-camera-status');
 
+    this.videoContainer = document.getElementById('tx-video-container');
+    this.cameraUrlInput = document.getElementById('tx-camera-url-input');
+    this.camRefreshBtn = document.getElementById('tx-cam-refresh-btn');
+    this.camFullscreenBtn = document.getElementById('tx-cam-fullscreen-btn');
+    this.camPopoutBtn = document.getElementById('tx-cam-popout-btn');
+
     this.peerUrlInput = document.getElementById('tx-peer-url');
     this.peerConnectBtn = document.getElementById('tx-peer-connect-btn');
     this.peerDisconnectBtn = document.getElementById('tx-peer-disconnect-btn');
@@ -45,6 +51,10 @@ class TransmitterView {
 
     this.cameraOnBtn.addEventListener('click', () => this.cameraOn());
     this.cameraOffBtn.addEventListener('click', () => this.cameraOff());
+
+    if (this.camRefreshBtn) this.camRefreshBtn.addEventListener('click', () => this.refreshVideo());
+    if (this.camFullscreenBtn) this.camFullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
+    if (this.camPopoutBtn) this.camPopoutBtn.addEventListener('click', () => this.openPopoutVideo());
 
     this.peerConnectBtn.addEventListener('click', () => this.connectPeer());
     this.peerDisconnectBtn.addEventListener('click', () => this.disconnectPeer());
@@ -101,6 +111,22 @@ class TransmitterView {
     } else if (type === 'CAR_MESSAGE') {
       // Manejar mensajes del carro (PC_IP, CAMERA_IP, etc.)
       this._handleCarMessage(data.message);
+    } else if (type === 'PEER_PROGRESS') {
+      if (data.fase === 'confirmado') {
+        this.addLog(`Receptor: robot confirmó '${data.comando}'`, 'valid');
+      } else if (data.fase === 'descifrado') {
+        this.addLog(`Receptor descifró bloque: ${data.detalle?.numero} → ${data.detalle?.nombre || data.comando}`, 'info');
+      } else if (data.fase === 'robot') {
+        this.addLog(`Receptor enviando orden al robot: '${data.comando}'`, 'command');
+      } else if (data.fase === 'descartado') {
+        this.addLog(`Receptor descartó: ${data.detalle?.motivo || 'inválido'}`, 'invalid');
+      }
+    } else if (type === 'PEER_PROGRAM_RESULT') {
+      if (data.estado === 'OK') {
+        this.addLog(`Programa completado exitosamente en el receptor remoto (${data.comando || ''})`, 'valid');
+      } else {
+        this.addLog(`Receptor reportó error: ${data.motivo || data.estado}`, 'invalid');
+      }
     }
   }
 
@@ -238,44 +264,18 @@ class TransmitterView {
       return;
     }
 
-    // Check if peer is connected
-    let peerConnected = false;
+    // Check if car is already connected (direct mode)
+    let carConnected = false;
     try {
-      const peerRes = await this.client.request('peer-status');
-      peerConnected = peerRes.ok && peerRes.data?.connected;
-    } catch { /* no peer */ }
+      const healthRes = await this.client.request('health');
+      carConnected = healthRes.ok && healthRes.data?.carConnected;
+    } catch { }
 
-    if (peerConnected) {
-      // Peer mode: tell receiver to connect to car first
-      this.addLog('Pidiendo al receptor que conecte el carro...', 'info');
-      try {
-        const rawUrl = this.carUrlInput ? this.carUrlInput.value.trim() : NetworkConfig.CAR_IP;
-        const match = rawUrl.match(/^(?:ws:\/\/)?([^:/]+)(?::(\d+))?(?:\/.*)?$/i);
-        const ip = match ? match[1] : rawUrl;
-        const port = match && match[2] ? parseInt(match[2], 10) : 80;
-        const connectRes = await this.client.request('connect-car-peer', { ip, port });
-        if (!connectRes.ok) {
-          this.addLog(`Error: ${connectRes.data?.error || connectRes.error}`, 'invalid');
-          return;
-        }
-        this.addLog(`Receptor conectando al carro (${NetworkConfig.CAR_IP})...`, 'info');
-        await new Promise(r => setTimeout(r, 1500));
-      } catch (err) {
-        this.addLog(`Error: ${err.message}`, 'invalid');
-        return;
-      }
-    } else {
-      // Direct mode: check if car is connected
-      try {
-        const healthRes = await this.client.request('health');
-        if (!healthRes.ok || !healthRes.data?.carConnected) {
-          this.addLog('No hay conexión con el carro ni con el peer. Conectá el carro primero.', 'invalid');
-          return;
-        }
-      } catch {
-        this.addLog('No se pudo verificar el estado del carro', 'invalid');
-        return;
-      }
+    if (!carConnected) {
+      // Car not connected yet — connect first via POST /robot (same as connectCar)
+      await this.connectCar();
+      if (!this.cameraActive) return;
+      return; // connectCar already calls cameraOn recursively
     }
 
     // Send camera ON command
@@ -310,7 +310,8 @@ class TransmitterView {
         this.cameraOnBtn.disabled = false;
         this.cameraOffBtn.disabled = true;
         this.stopVideo();
-        this.addLog(`Cámara apagada (P) — secuencia ${res.data.sequenceId}`, 'warn');
+        this.addLog('Cámara apagada (P) — Sesión finalizada, carro desconectado', 'warn');
+        await this.disconnectCar();
       } else {
         const errorMsg = res.data?.error || res.error || 'desconocido';
         this.addLog(`Error apagando cámara: ${errorMsg}`, 'invalid');
@@ -324,28 +325,44 @@ class TransmitterView {
     if (this.videoPlaceholder) this.videoPlaceholder.classList.add('hidden');
     if (this.videoOverlay) this.videoOverlay.classList.remove('hidden');
     this.videoActive = true;
-    this.addLog('Cámara encendida (N)', 'valid');
 
     try {
-      const res = await this.client.request('health');
-      const health = res.data;
+      let streamUrl = this.cameraUrlInput ? this.cameraUrlInput.value.trim() : 'http://192.168.0.51';
+      if (!streamUrl) streamUrl = 'http://192.168.0.51';
 
-      if (health.cameraStream && this.videoPlayer) {
-        this.videoPlayer.src = health.cameraStream;
-        this.videoPlayer.style.display = 'block';
-        this.addLog(`Stream MJPEG: ${health.cameraStream}`, 'info');
-      } else if (health.carAddress && this.videoPlayer) {
-        const streamUrl = `http://${health.carAddress}`;
+      const res = await this.client.request('health');
+      const health = res.data || {};
+      if (health.carAddress && health.carAddress.includes('8081')) {
+        const host = health.carAddress.split(':')[0] || '127.0.0.1';
+        streamUrl = `http://${host}:8081/mjpeg`;
+        if (this.cameraUrlInput) this.cameraUrlInput.value = streamUrl;
+      } else if (health.carAddress && health.carAddress.includes('192.168.0.50')) {
+        streamUrl = 'http://192.168.0.51';
+        if (this.cameraUrlInput) this.cameraUrlInput.value = streamUrl;
+      }
+
+      if (this.videoPlayer) {
         this.videoPlayer.src = streamUrl;
         this.videoPlayer.style.display = 'block';
-        this.addLog(`Stream MJPEG: ${streamUrl}`, 'info');
-      } else {
-        if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
-        this.addLog('No se pudo obtener la URL del stream', 'warn');
+        this.videoPlayer.onerror = () => {
+          if (streamUrl === 'http://192.168.0.51') {
+            const fallback = 'http://192.168.0.51:81/stream';
+            this.videoPlayer.src = fallback;
+            if (this.cameraUrlInput) this.cameraUrlInput.value = fallback;
+          } else {
+            this.addLog(`⚠️ Cámara no accesible en ${streamUrl}. Verifica que el ESP32 esté encendido y en la red.`, 'warn');
+            if (this.videoPlaceholder) {
+              this.videoPlaceholder.classList.remove('hidden');
+              const textSpan = this.videoPlaceholder.querySelector('span:last-child');
+              if (textSpan) textSpan.textContent = '⚠️ Cámara fuera de línea (Verificar Wi-Fi / IP)';
+            }
+            if (this.videoOverlay) this.videoOverlay.classList.add('hidden');
+          }
+        };
+        this.addLog(`Intentando conectar stream de video: ${streamUrl}`, 'info');
       }
     } catch {
-      if (this.videoPlayer) this.videoPlayer.removeAttribute('src');
-      this.addLog('Error obteniendo URL del stream', 'warn');
+      this.addLog('No se pudo iniciar el stream de video', 'warn');
     }
   }
 
@@ -357,22 +374,65 @@ class TransmitterView {
       this.videoPlayer.removeAttribute('src');
       this.videoPlayer.style.display = 'none';
     }
-    this.addLog('Cámara apagada (P)', 'warn');
+  }
+
+  refreshVideo() {
+    if (!this.videoPlayer || !this.videoActive) return;
+    const currentUrl = this.cameraUrlInput ? this.cameraUrlInput.value.trim() : this.videoPlayer.src;
+    const separator = currentUrl.includes('?') ? '&' : '?';
+    this.videoPlayer.src = `${currentUrl}${separator}_t=${Date.now()}`;
+    this.addLog('Stream de video recargado', 'info');
+  }
+
+  toggleFullscreen() {
+    const container = this.videoContainer || document.getElementById('tx-video-container');
+    if (!container) return;
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  openPopoutVideo() {
+    const url = this.cameraUrlInput ? this.cameraUrlInput.value.trim() : (this.videoPlayer?.src || 'http://192.168.0.51:81/stream');
+    const popout = window.open('', 'ESP32_Camera_Live', 'width=800,height=600,menubar=no,toolbar=no,location=no,status=no');
+    if (popout) {
+      popout.document.open();
+      popout.document.write(`
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <title>ESP32 Cámara — Stream en Vivo</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { background: #0a0e14; display: flex; align-items: center; justify-content: center; width: 100vw; height: 100vh; overflow: hidden; font-family: monospace; }
+            img { width: 100%; height: 100%; object-fit: contain; }
+            .live-badge { position: fixed; top: 12px; right: 12px; background: rgba(255, 0, 0, 0.85); color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 12px; z-index: 10; box-shadow: 0 0 10px rgba(255,0,0,0.5); }
+          </style>
+        </head>
+        <body>
+          <div class="live-badge">LIVE 🔴</div>
+          <img src="${url}" alt="ESP32 Live Stream" onerror="this.onerror=null; if(this.src.includes(':81/stream')) this.src='http://192.168.0.51/';">
+        </body>
+        </html>
+      `);
+      popout.document.close();
+      this.addLog('Cámara abierta en ventana independiente', 'info');
+    }
   }
 
   addLog(message, type = 'info') {
     const entry = document.createElement('div');
-    entry.className = 'log-entry';
-
-    const timestamp = new Date().toLocaleTimeString('es-MX', { hour12: false });
-
+    entry.className = `log-entry log-${type}`;
     entry.innerHTML = `
-      <span class="log-timestamp">[${timestamp}]</span>
-      <span class="log-message log-${type}">${this.escapeHtml(message)}</span>
+      <span class="log-timestamp">${new Date().toLocaleTimeString()}</span>
+      <span class="log-message">${message}</span>
     `;
 
     this.logConsole.appendChild(entry);
-    while (this.logConsole.children.length > 500) {
+    while (this.logConsole.children.length > 800) {
       this.logConsole.removeChild(this.logConsole.firstChild);
     }
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
@@ -398,23 +458,70 @@ class TransmitterView {
     this.carConnectBtn.disabled = true;
     this.addLog(`Solicitando conexión al carro (${ip}:${port})...`, 'info');
 
+    const robotUrl = `ws://${ip}:${port}/ws`;
+
     try {
-      // Si estamos conectados a un peer, la orden es 'connect-car-peer'. Si es local, es 'connect'.
+      // Check if there's an external peer (receptor) connected
       let peerConnected = false;
+      let peerAddress = null;
       try {
         const peerRes = await this.client.request('peer-status');
         peerConnected = peerRes.ok && peerRes.data?.connected;
+        if (peerConnected) peerAddress = peerRes.data?.address;
       } catch { }
 
-      const action = peerConnected ? 'connect-car-peer' : 'connect';
-      const res = await this.client.request(action, { ip, port });
-      
-      if (!res.ok) {
-        this.addLog(`Error conectando carro: ${res.data?.error || res.error}`, 'invalid');
+      if (peerConnected && peerAddress) {
+        // External receptor mode: POST /robot directly to the external receptor
+        // (like Andrés Cuello's emisor does with receptor IP)
+        const [receptorIp, receptorPort] = peerAddress.split(':');
+        const postUrl = `http://${receptorIp}:${receptorPort || 80}/robot`;
+        this.addLog(`POST /robot → ${postUrl} (robotUrl: ${robotUrl})`, 'info');
+
+        try {
+          const resp = await fetch(postUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: robotUrl })
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            this.addLog(`Error POST /robot: ${data.error || resp.statusText}`, 'invalid');
+            return;
+          }
+          this.addLog(`Receptor conectado al carro (${data.robotUrl || robotUrl})`, 'valid');
+        } catch (fetchErr) {
+          this.addLog(`Error POST /robot al receptor: ${fetchErr.message}`, 'invalid');
+          return;
+        }
       } else {
-        this.addLog(peerConnected ? 'Orden de conectar enviada al Receptor' : 'Carro conectado localmente', 'valid');
-        this.carDisconnectBtn.disabled = false;
+        // Local mode: POST /robot to our own backend (we ARE the receptor)
+        const postUrl = `${window.location.protocol}//${window.location.host}/robot`;
+        this.addLog(`POST /robot → ${postUrl} (robotUrl: ${robotUrl})`, 'info');
+
+        try {
+          const resp = await fetch(postUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: robotUrl })
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            this.addLog(`Error POST /robot: ${data.error || resp.statusText}`, 'invalid');
+            return;
+          }
+          this.addLog(`Carro conectado (${data.robotUrl || robotUrl})`, 'valid');
+        } catch (fetchErr) {
+          this.addLog(`Error POST /robot: ${fetchErr.message}`, 'invalid');
+          return;
+        }
       }
+
+      this.carDisconnectBtn.disabled = false;
+
+      // Auto-encender la cámara de inmediato al conectar
+      this.addLog('Encendiendo cámara del carro automáticamente...', 'info');
+      await new Promise(r => setTimeout(r, 600));
+      await this.cameraOn();
     } catch (err) {
       this.addLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
     } finally {
@@ -475,7 +582,7 @@ class TransmitterView {
         this.peerStatus.textContent = 'Error de conexión';
         this.peerStatus.className = 'peer-status peer-error';
         this.peerConnectBtn.disabled = false;
-        this.addLog(`Error conectando al receptor: ${errorMsg}`, 'invalid');
+        this.addLog(errorMsg.startsWith('Error') ? errorMsg : `Error conectando al receptor: ${errorMsg}`, 'invalid');
       }
     } catch (err) {
       this.peerStatus.textContent = 'Error de conexión';

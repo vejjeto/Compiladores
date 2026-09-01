@@ -33,16 +33,34 @@ const COMMAND_ACTIONS = {
 };
 
 let controlClient = null;
+let modoSimulador = process.env.SIM_MODE || 'normal';
+const MODO_LENTO_MS = 7000;
+
+const estado = {
+  movimiento: 'quieto',
+  pinza: 'abierta',
+  camara: 'apagada'
+};
 
 function procesarComando(client, char, ackId = null) {
   if (controlClient !== null && controlClient !== client) {
-    client.send('ERROR: Control ocupado');
+    client.send(`C.E ${char}`);
     console.log(`[CMD] Intento de control desde IP distinta → rechazado`);
     return;
   }
 
   if (controlClient === null) {
     controlClient = client;
+  }
+
+  // Modo error: rechazar todo
+  if (modoSimulador === 'error') {
+    console.log(`[CMD] '${char}' → RECHAZADO (modo error)`);
+    const response = ackId
+      ? JSON.stringify({ v: 1, ack: false, cmd: char, status: 'error', ackId, motivo: 'Fallo simulado' })
+      : `ERROR:${char}`;
+    if (client.readyState === WebSocket.OPEN) client.send(response);
+    return;
   }
 
   if (char === 'M') {
@@ -60,15 +78,40 @@ function procesarComando(client, char, ackId = null) {
   }
 
   const action = COMMAND_ACTIONS[char] || 'Acción desconocida';
-  console.log(`[CMD] Recibido: '${char}' → ${action}`);
+  console.log(`[CMD] Recibido: '${char}' → ${action} (modo: ${modoSimulador})`);
+
+  // Update simulator state
+  switch (char) {
+    case 'F': estado.movimiento = 'avanzando'; break;
+    case 'B': estado.movimiento = 'retrocediendo'; break;
+    case 'L': estado.movimiento = 'girando_izq'; break;
+    case 'R': estado.movimiento = 'girando_der'; break;
+    case 'N': estado.camara = 'encendida'; break;
+    case 'P': estado.camara = 'apagada'; break;
+    case 'O': estado.pinza = 'abierta'; break;
+    case 'C': estado.pinza = 'cerrada'; break;
+  }
+
+  // Modo timeout: nunca responder
+  if (modoSimulador === 'timeout') {
+    console.log(`[CMD] '${char}' → SIN RESPUESTA (modo timeout)`);
+    return;
+  }
+
+  // Modo lento: 7 segundos de delay
+  const delay = modoSimulador === 'lento' ? MODO_LENTO_MS : 150;
 
   setTimeout(() => {
+    // Reset movement after delay
+    if (['F', 'B', 'L', 'R'].includes(char)) {
+      estado.movimiento = 'quieto';
+    }
     const response = ackId
       ? JSON.stringify({ v: 1, ack: true, cmd: char, status: 'done', ackId })
       : `ACK:${char}`;
     console.log(`[RSP] ${response}`);
     if (client.readyState === WebSocket.OPEN) client.send(response);
-  }, 150);
+  }, delay);
 }
 
 function handleConnection(ws) {
@@ -146,6 +189,32 @@ const httpServer = createServer((req, res) => {
     handleMjpeg(req, res);
     return;
   }
+  if (req.url === '/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      modo: modoSimulador,
+      clientes: wss.clients.size,
+      controlAsignado: controlClient !== null,
+      movimiento: estado.movimiento,
+      pinza: estado.pinza,
+      camara: estado.camara,
+      uptime: Math.round(process.uptime() * 1000)
+    }));
+    return;
+  }
+  if (req.url?.startsWith('/modo/')) {
+    const nuevoModo = req.url.slice(6);
+    if (['normal', 'lento', 'timeout', 'error'].includes(nuevoModo)) {
+      modoSimulador = nuevoModo;
+      console.log(`[CONFIG] Modo cambiado a: ${nuevoModo}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, modo: modoSimulador }));
+      return;
+    }
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'Modos válidos: normal, lento, timeout, error' }));
+    return;
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 });
@@ -158,6 +227,9 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`  WS  → ws://127.0.0.1:${PORT}/ws (desde esta PC)`);
   console.log(`  MJPEG → http://${LOCAL_IP}:${PORT}/mjpeg`);
   console.log(`  IP del simulador → ${LOCAL_IP}`);
+  console.log(`\n  Modo actual: ${modoSimulador}`);
+  console.log('  Cambiar modo: curl http://127.0.0.1:' + PORT + '/modo/lento');
+  console.log('  Modos: normal | lento (7s) | timeout (sin respuesta) | error (rechaza todo)\n');
 });
 
 console.log('\nEsperando conexiones...\n');

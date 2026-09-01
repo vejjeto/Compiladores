@@ -119,6 +119,16 @@ describe('Parser - parseCommands', () => {
     assert.strictEqual(result.commands.length, 3);
   });
 
+  it('debe aceptar punto y coma o espacios como separadores', () => {
+    const r1 = parseCommands('F:2; B:3; L');
+    assert.strictEqual(r1.valid, true);
+    assert.strictEqual(r1.commands.length, 3);
+
+    const r2 = parseCommands('F:2 B:3 L');
+    assert.strictEqual(r2.valid, true);
+    assert.strictEqual(r2.commands.length, 3);
+  });
+
 });
 
 describe('Parser - getCommandInfo', () => {

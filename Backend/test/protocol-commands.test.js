@@ -70,6 +70,12 @@ describe('parseMessage', () => {
     assert.deepStrictEqual(parsed.data, { ack: true, cmd: 'F' });
   });
 
+  it('parses a C.E firmware response as kind legacy', () => {
+    const parsed = parseMessage('C.E F');
+    assert.strictEqual(parsed.kind, 'legacy');
+    assert.deepStrictEqual(parsed.data, { ack: true, cmd: 'F' });
+  });
+
   it('treats garbage payloads as kind unknown', () => {
     const parsed = parseMessage('hello world');
     assert.strictEqual(parsed.kind, 'unknown');

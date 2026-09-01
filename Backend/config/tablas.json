@@ -15,45 +15,45 @@
       "min": 2000,
       "max": 2999
     },
-    "R": {
-      "esp32": "R",
-      "name": "Girar Derecha",
-      "type": "movement",
-      "min": 3000,
-      "max": 3999
-    },
     "L": {
       "esp32": "L",
       "name": "Girar Izquierda",
       "type": "movement",
+      "min": 3000,
+      "max": 3999
+    },
+    "R": {
+      "esp32": "R",
+      "name": "Girar Derecha",
+      "type": "movement",
       "min": 4000,
       "max": 4999
-    },
-    "O": {
-      "esp32": "O",
-      "name": "Abrir Pinza",
-      "type": "action",
-      "min": 5000,
-      "max": 5999
-    },
-    "C": {
-      "esp32": "C",
-      "name": "Cerrar Pinza",
-      "type": "action",
-      "min": 6000,
-      "max": 6999
     },
     "N": {
       "esp32": "N",
       "name": "Encender Cámara",
       "type": "camera",
-      "min": 7000,
-      "max": 7999
+      "min": 5000,
+      "max": 5999
     },
     "P": {
       "esp32": "P",
       "name": "Apagar Cámara",
       "type": "camera",
+      "min": 6000,
+      "max": 6999
+    },
+    "O": {
+      "esp32": "O",
+      "name": "Abrir Pinza",
+      "type": "action",
+      "min": 7000,
+      "max": 7999
+    },
+    "C": {
+      "esp32": "C",
+      "name": "Cerrar Pinza",
+      "type": "action",
       "min": 8000,
       "max": 8999
     },

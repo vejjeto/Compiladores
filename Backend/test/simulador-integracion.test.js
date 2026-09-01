@@ -110,7 +110,7 @@ test('flujo de control y ACK contra el simulador real', async () => {
   assert.strictEqual(await waitForMessage(clientB), 'ERROR: Control ocupado');
 
   clientB.send('M');
-  assert.strictEqual(await waitForMessage(clientB), 'ERROR: Control ocupado');
+  assert.strictEqual(await waitForMessage(clientB), 'C.E M');
 
   clientA.send('M');
   assert.strictEqual(await waitForMessage(clientA), 'Control liberado');
@@ -129,4 +129,35 @@ test('MJPEG del simulador responde con multipart/x-mixed-replace', async () => {
 
   assert.strictEqual(mjpeg.status, 200);
   assert.ok(mjpeg.contentType.startsWith('multipart/x-mixed-replace'));
+});
+
+test('simulador endpoints /status y /modo/ soportan cambio de modo de fallo', async () => {
+  // Check default status
+  const statusRes = await new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${SIM_PORT}/status`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(JSON.parse(data)));
+    }).on('error', reject);
+  });
+  assert.strictEqual(statusRes.modo, 'normal');
+
+  // Change mode to error
+  const modoRes = await new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${SIM_PORT}/modo/error`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(JSON.parse(data)));
+    }).on('error', reject);
+  });
+  assert.strictEqual(modoRes.ok, true);
+  assert.strictEqual(modoRes.modo, 'error');
+
+  // Restore mode to normal
+  await new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${SIM_PORT}/modo/normal`, (res) => {
+      res.resume();
+      res.on('end', resolve);
+    }).on('error', reject);
+  });
 });

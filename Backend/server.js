@@ -243,12 +243,50 @@ async function handleRequest(req, res, ctx) {
       return respond(res, 200, { ok: true, status: 200, data: result, error: null });
     }
 
+    if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
+      return respond(res, 200, {
+        tipo: 'estado',
+        robot: ctx.carService.connected ? 'conectado' : 'desconectado',
+        robotUrl: ctx.carService.address ? `ws://${ctx.carService.address}/ws` : 'ws://192.168.0.50/ws',
+        transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
+        monitores: ctx.wsServerAdapter?.wss?.clients?.size || 0
+      });
+    }
+
     if (method === 'POST') {
       let body;
       try {
         body = await readBody(req);
       } catch (err) {
         return respond(res, 400, { ok: false, error: err.message });
+      }
+
+      if (reqPath === '/robot' || reqPath === '/api/robot') {
+        let urlStr = body.url || body.robotUrl || (body.ip ? `ws://${body.ip}:${body.port || 80}/ws` : null);
+        if (!urlStr) {
+          return respond(res, 400, { error: 'Se esperaba {"url":"ws://host/ruta"}' });
+        }
+        // Validate URL format (must be ws:// or wss://)
+        let parsedUrl;
+        try {
+          parsedUrl = new URL(urlStr);
+        } catch {
+          return respond(res, 400, { error: 'URL inválida' });
+        }
+        if (parsedUrl.protocol !== 'ws:' && parsedUrl.protocol !== 'wss:') {
+          return respond(res, 400, { error: 'Se esperaba protocolo ws:// o wss://' });
+        }
+        if (!parsedUrl.hostname) {
+          return respond(res, 400, { error: 'URL sin hostname' });
+        }
+        const ip = parsedUrl.hostname;
+        const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : 80;
+        try {
+          await ctx.carService.connect(ip, port);
+          return respond(res, 200, { robotUrl: urlStr });
+        } catch (err) {
+          return respond(res, 502, { error: err.message });
+        }
       }
 
       const routeHandlers = {

@@ -24,6 +24,7 @@ export class WsServerAdapter {
     this.heartbeat = null;
     this.localIp = this._detectLocalIp();
     this.peerConnections = new Set();
+    this.monitorConnections = new Set();
   }
 
   _detectLocalIp() {
@@ -38,6 +39,59 @@ export class WsServerAdapter {
     return '127.0.0.1';
   }
 
+  _buildEstado() {
+    return {
+      tipo: 'estado',
+      robot: this.ctx.carService.connected ? 'conectado' : 'desconectado',
+      robotUrl: this.ctx.carService.address
+        ? `ws://${this.ctx.carService.address}/ws`
+        : 'ws://192.168.0.50/ws',
+      transmisores: this.peerConnections.size,
+      monitores: this.monitorConnections.size,
+      direcciones: this._getTransmitterAddresses()
+    };
+  }
+
+  _getTransmitterAddresses() {
+    const ifaces = os.networkInterfaces();
+    const addresses = [];
+    for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          addresses.push(`ws://${iface.address}/transmisor`);
+        }
+      }
+    }
+    return addresses.length > 0 ? addresses : ['ws://127.0.0.1/transmisor'];
+  }
+
+  _handleMonitorConnection(ws) {
+    this.monitorConnections.add(ws);
+    this.logger.info(COMPONENT, 'Monitor conectado');
+
+    // Send current state immediately
+    ws.send(JSON.stringify(this._buildEstado()));
+
+    ws.on('close', () => {
+      this.monitorConnections.delete(ws);
+      this.logger.info(COMPONENT, 'Monitor desconectado');
+    });
+
+    ws.on('error', () => {
+      this.monitorConnections.delete(ws);
+    });
+  }
+
+  broadcastMonitor(data) {
+    if (this.monitorConnections.size === 0) return;
+    const json = JSON.stringify(data);
+    for (const monitor of this.monitorConnections) {
+      if (monitor.readyState === monitor.OPEN) {
+        monitor.send(json);
+      }
+    }
+  }
+
   start() {
     this.wss = new WebSocketServer({ noServer: true });
     this.wss.on('connection', (ws) => this._handleConnection(ws));
@@ -50,6 +104,10 @@ export class WsServerAdapter {
       if (url.pathname === '/ws' || url.pathname === '/ws/peer' || url.pathname === '/transmisor') {
         this.peerWss.handleUpgrade(req, socket, head, (ws) => {
           this.peerWss.emit('connection', ws, req);
+        });
+      } else if (url.pathname === '/monitor') {
+        this.wss.handleUpgrade(req, socket, head, (ws) => {
+          this._handleMonitorConnection(ws);
         });
       } else if (url.pathname === '/ws/api') {
         this.wss.handleUpgrade(req, socket, head, (ws) => {
@@ -162,6 +220,9 @@ export class WsServerAdapter {
         client.send(payload);
       }
     }
+
+    // Also broadcast to monitors as log entries
+    this.broadcastMonitor({ tono: 'info', texto: `[${event}] ${JSON.stringify(data)}`, hora: new Date().toISOString() });
   }
 
   stop() {
@@ -193,6 +254,9 @@ export class WsServerAdapter {
       ip: clientIp,
       timestamp: new Date().toISOString()
     });
+
+    // Notify monitors about new transmitter count
+    this.broadcastMonitor(this._buildEstado());
 
     // Forward car events to this peer
     const unsubAudit = this.ctx.auditService.subscribe(({ type, data }) => {
@@ -290,13 +354,22 @@ export class WsServerAdapter {
         this.logger.info(COMPONENT, `Programa de números remoto del peer recibido`);
         if (!this.ctx.carService.connected) {
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'program-result', ok: false, status: 409, data: { error: 'Carro no conectado en el receptor' } }));
+            ws.send(JSON.stringify({
+              estado: 'ERROR',
+              motivo: 'Robot desconectado'
+            }));
           }
           return;
         }
         const result = this.ctx.transmisorService.executeEncodedProgram(msg.programa);
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'program-result', ok: result.ok, status: result.status, data: result }));
+          // GitLab-compatible direct response format
+          ws.send(JSON.stringify({
+            estado: result.ok ? 'OK' : 'ERROR',
+            comando: result.program || '',
+            motivo: result.error || undefined,
+            timestamp: new Date().toISOString()
+          }));
         }
         return;
       }
@@ -327,6 +400,9 @@ export class WsServerAdapter {
         ip: clientIp,
         timestamp: new Date().toISOString()
       });
+
+      // Notify monitors about transmitter count change
+      this.broadcastMonitor(this._buildEstado());
     });
 
     ws.on('error', () => {

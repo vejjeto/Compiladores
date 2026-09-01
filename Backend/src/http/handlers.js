@@ -271,28 +271,42 @@ async function peerStatus(ctx) {
 
 async function connectCarPeer(ctx, body) {
   const { ip, port } = body;
+  const carIp = ip || DEFAULT_CAR_IP;
+  const carPort = port || DEFAULT_CAR_PORT;
 
-  if (!ctx.peerAdapter.connected) {
-    return {
-      ok: false,
-      status: 409,
-      data: { ok: false, error: 'No hay conexión con el peer. Conectá el peer primero.' },
-      error: 'Peer no conectado'
-    };
+  // Mode 1: External peer connected → POST /robot to the external receptor
+  if (ctx.peerAdapter.connected) {
+    try {
+      await ctx.peerAdapter.sendConnectCar(carIp, carPort);
+      return {
+        ok: true,
+        status: 200,
+        data: { ok: true, message: 'Orden de conectar carro enviada al receptor externo', mode: 'peer' },
+        error: null
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        status: 500,
+        data: { ok: false, error: err.message },
+        error: err.message
+      };
+    }
   }
 
+  // Mode 2: No external peer → connect directly (same as 'connect' action)
   try {
-    ctx.peerAdapter.sendConnectCar(ip || DEFAULT_CAR_IP, port || DEFAULT_CAR_PORT);
+    const result = await ctx.carService.connect(carIp, carPort);
     return {
       ok: true,
       status: 200,
-      data: { ok: true, message: 'Orden de conectar carro enviada al peer' },
+      data: { ok: true, message: 'Carro conectado directamente', mode: 'direct', ...result },
       error: null
     };
   } catch (err) {
     return {
       ok: false,
-      status: 500,
+      status: 502,
       data: { ok: false, error: err.message },
       error: err.message
     };

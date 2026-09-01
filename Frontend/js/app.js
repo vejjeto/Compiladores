@@ -160,35 +160,55 @@ const Beep = (() => {
   let ctx = null;
   let gain = null;
   let filter = null;
+  let userInteracted = false;
+
+  const unlock = () => {
+    userInteracted = true;
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    window.removeEventListener('pointerdown', unlock);
+    window.removeEventListener('keydown', unlock);
+  };
+  window.addEventListener('pointerdown', unlock, { passive: true });
+  window.addEventListener('keydown', unlock, { passive: true });
 
   function ensure() {
     if (ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    ctx = new AC();
-    gain = ctx.createGain();
-    filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 1500;
-    filter.Q.value = 0.8;
-    gain.connect(filter);
-    filter.connect(ctx.destination);
-    gain.gain.value = 0.05;
+    try {
+      ctx = new AC();
+      gain = ctx.createGain();
+      filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 1500;
+      filter.Q.value = 0.8;
+      gain.connect(filter);
+      filter.connect(ctx.destination);
+      gain.gain.value = 0.05;
+    } catch { }
   }
 
   function tone(freq, dur, type = 'sine') {
+    if (!userInteracted) return;
     ensure();
     if (!ctx) return;
-    if (ctx.state === 'suspended') ctx.resume();
-    const o = ctx.createOscillator();
-    o.type = type;
-    o.frequency.value = freq;
-    o.connect(gain);
-    const now = ctx.currentTime;
-    gain.gain.setValueAtTime(0.05, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur / 1000);
-    o.start(now);
-    o.stop(now + dur / 1000);
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+      return;
+    }
+    try {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = freq;
+      o.connect(gain);
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.05, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + dur / 1000);
+      o.start(now);
+      o.stop(now + dur / 1000);
+    } catch { }
   }
 
   return {

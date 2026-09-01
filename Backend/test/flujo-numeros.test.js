@@ -257,4 +257,20 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
     assert.ok(data.errors.some(e => e.includes('no acepta parámetro de repetición')));
   });
 
+  it('POST /robot y GET /estado (Compatibilidad GitLab / Andrés Cuello)', async () => {
+    const res = await fetch(`http://127.0.0.1:${appPort}/robot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: `ws://127.0.0.1:${carPort}/ws` })
+    });
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.ok(data.robotUrl.includes(String(carPort)));
+
+    const estadoRes = await fetch(`http://127.0.0.1:${appPort}/estado`);
+    const estadoData = await estadoRes.json();
+    assert.strictEqual(estadoRes.status, 200);
+    assert.strictEqual(estadoData.robot, 'conectado');
+  });
+
 });
