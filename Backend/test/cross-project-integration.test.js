@@ -32,6 +32,10 @@ const DIEGO_PATH = 'C:\\Users\\diego\\OneDrive\\Documents\\Univerisdad\\Proyecto
 const ROBERT_PATH = 'C:\\Users\\diego\\OneDrive\\Desktop\\Super Pruebas\\mi-proyecto-compiladores';
 const ANDRES_PATH = 'C:\\Users\\diego\\OneDrive\\Desktop\\Super Pruebas\\andrescuello-compiladores\\receptor';
 
+// Saltar todo el suite si los paths externos no existen (CI, otra máquina, etc.)
+const PROJECTS_AVAILABLE = fs.existsSync(DIEGO_PATH) && fs.existsSync(ROBERT_PATH);
+const DESCRIBE = PROJECTS_AVAILABLE ? describe : describe.skip;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -155,7 +159,7 @@ function leerTablasDiego() {
 //  TESTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('Cross-Project Integration — Diego (active) ↔ Robert ↔ Andres', () => {
+DESCRIBE('Cross-Project Integration — Diego (active) ↔ Robert ↔ Andres', () => {
 
   // ───────────────────────────────────────────────────────────────────────────
   //  ESCENARIO 1: Primos idénticos en los 3 proyectos
