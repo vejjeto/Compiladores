@@ -33,6 +33,12 @@ class TransmitterView {
     this.peerDisconnectBtn = document.getElementById('tx-peer-disconnect-btn');
     this.peerStatus = document.getElementById('tx-peer-status');
 
+    this.scanIpsBtn = document.getElementById('tx-scan-ips-btn');
+    this.scanIpsLoading = document.getElementById('tx-scan-ips-loading');
+    this.scanIpsList = document.getElementById('tx-scan-ips-list');
+    this.scanIpsSelect = document.getElementById('tx-scan-ips-select');
+    this.scanIpsConnectBtn = document.getElementById('tx-scan-ips-connect-btn');
+
     this.carUrlInput = document.getElementById('tx-esp-url');
     this.carConnectBtn = document.getElementById('tx-connect-car-btn');
     this.carDisconnectBtn = document.getElementById('tx-disconnect-car-btn');
@@ -58,6 +64,13 @@ class TransmitterView {
 
     this.peerConnectBtn.addEventListener('click', () => this.connectPeer());
     this.peerDisconnectBtn.addEventListener('click', () => this.disconnectPeer());
+
+    if (this.scanIpsBtn) {
+      this.scanIpsBtn.addEventListener('click', () => this.scanNetwork());
+    }
+    if (this.scanIpsConnectBtn) {
+      this.scanIpsConnectBtn.addEventListener('click', () => this.connectFromDropdown());
+    }
 
     if (this.carConnectBtn) this.carConnectBtn.addEventListener('click', () => this.connectCar());
     if (this.carDisconnectBtn) this.carDisconnectBtn.addEventListener('click', () => this.disconnectCar());
@@ -553,16 +566,24 @@ class TransmitterView {
   }
 
   async connectPeer() {
-    const url = this.peerUrlInput.value.trim();
-    if (!url) {
-      this.addLog('Ingresá la URL del receptor (ej: ws://192.168.0.XX/ws)', 'invalid');
+    const raw = this.peerUrlInput.value.trim();
+    if (!raw) {
+      this.addLog('Ingresá la IP del receptor (ej: 192.168.0.XX)', 'invalid');
       return;
     }
 
-    // Validate URL format
-    if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
-      this.addLog('URL inválida. Debe empezar con ws:// o wss://', 'invalid');
-      return;
+    // If it already starts with ws:// or wss://, use as-is
+    let url;
+    if (raw.startsWith('ws://') || raw.startsWith('wss://')) {
+      url = raw;
+    } else {
+      // Treat as bare IP or IP:port — auto-construct ws:// URL
+      const ipPattern = /^[\w.-]+(:\d+)?$/;
+      if (!ipPattern.test(raw)) {
+        this.addLog('Formato inválido. Ingresá una IP (ej: 192.168.0.35) o una URL completa (ws://...)', 'invalid');
+        return;
+      }
+      url = `ws://${raw}/ws/peer`;
     }
 
     this.addLog(`Conectando al receptor remoto: ${url}`, 'info');
@@ -589,9 +610,11 @@ class TransmitterView {
       this.peerStatus.className = 'peer-status peer-error';
       this.peerConnectBtn.disabled = false;
       if (err.message === 'Timeout') {
-        this.addLog('Timeout: tu backend no respondió. Verificá que esté corriendo en localhost', 'invalid');
+        this.addLog('Timeout: la IP no responde. Verificá que esté encendida y corriendo el receptor', 'invalid');
       } else if (err.message === 'WS no disponible') {
-        this.addLog('Tu backend no está conectado. Recargá la página (F5) y verificá que el backend esté corriendo', 'invalid');
+        this.addLog('Tu backend no está conectado. Recargá la página (F5)', 'invalid');
+      } else if (err.message.includes('500')) {
+        this.addLog(`Error 500: el servidor en esa IP está caído o no tiene WebSocket. Verificá que el receptor esté corriendo`, 'invalid');
       } else {
         this.addLog(`Error de conexión: ${err.message}`, 'invalid');
       }
@@ -609,6 +632,53 @@ class TransmitterView {
     } catch (err) {
       this.addLog(`Error desconectando receptor: ${err.message}`, 'invalid');
     }
+  }
+
+  async scanNetwork() {
+    if (!this.scanIpsBtn) return;
+
+    this.scanIpsBtn.disabled = true;
+    this.scanIpsLoading.classList.remove('hidden');
+    this.scanIpsList.classList.add('hidden');
+
+    try {
+      const result = await this.client.request('scan-network', {});
+
+      this.scanIpsLoading.classList.add('hidden');
+
+      if (result.ok && result.data.available.length > 0) {
+        this.scanIpsList.classList.remove('hidden');
+        const baseIP = result.data.baseIP || '192.168.0';
+        this.scanIpsSelect.innerHTML = `<option value="">-- ${result.data.available.length} receptores en ${baseIP}.x --</option>`;
+        for (const { ip, path } of result.data.available) {
+          const opt = document.createElement('option');
+          opt.value = JSON.stringify({ ip, path });
+          opt.textContent = `${ip}  (${path})`;
+          this.scanIpsSelect.appendChild(opt);
+        }
+        this.addLog(`Encontrados ${result.data.available.length} receptores en ${baseIP}.x`, 'valid');
+      } else {
+        this.addLog('No se encontraron receptores en la red', 'warn');
+        this.scanIpsList.classList.add('hidden');
+      }
+    } catch (err) {
+      this.scanIpsLoading.classList.add('hidden');
+      this.addLog(`Error escaneando la red: ${err.message}`, 'invalid');
+    } finally {
+      this.scanIpsBtn.disabled = false;
+    }
+  }
+
+  connectFromDropdown() {
+    const raw = this.scanIpsSelect.value;
+    if (!raw) {
+      this.addLog('Seleccioná una IP de la lista', 'invalid');
+      return;
+    }
+    const { ip, path } = JSON.parse(raw);
+    const port = 80;
+    this.peerUrlInput.value = `ws://${ip}:${port}${path}`;
+    this.connectPeer();
   }
 
   clearInput() {

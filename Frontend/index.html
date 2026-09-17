@@ -53,13 +53,26 @@
               type="text"
               class="form-input"
               id="tx-peer-url"
-              placeholder="ws://192.168.0.XX/ws"
+              placeholder="192.168.0.XX"
               spellcheck="false"
             >
             <button class="btn btn-primary" id="tx-peer-connect-btn">Conectar Receptor</button>
             <button class="btn btn-danger" id="tx-peer-disconnect-btn" disabled>Desconectar</button>
           </div>
           <div class="peer-status" id="tx-peer-status">Sin conexión remota (Modo Local)</div>
+          <div class="scan-ips-section">
+            <button class="btn btn-secondary" id="tx-scan-ips-btn">&#128269; Buscar IPs en la red</button>
+            <div class="scan-ips-loading hidden" id="tx-scan-ips-loading">
+              <div class="scan-spinner"></div>
+              <span>Escaneando...</span>
+            </div>
+            <div class="scan-ips-list hidden" id="tx-scan-ips-list">
+              <select class="form-input" id="tx-scan-ips-select">
+                <option value="">-- Seleccioná un receptor --</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="tx-scan-ips-connect-btn">Conectar</button>
+            </div>
+          </div>
         </div>
         <div class="form-group">
           <label>URL / IP del carro físico</label>

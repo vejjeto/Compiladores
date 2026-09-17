@@ -31,7 +31,9 @@ class BackendClient {
       'connect-peer': { path: '/api/connect-peer', method: 'POST' },
       'disconnect-peer': { path: '/api/disconnect-peer', method: 'POST' },
       'peer-status': { path: '/api/peer-status', method: 'GET' },
-      'connect-car-peer': { path: '/api/connect-car-peer', method: 'POST' }
+      'connect-car-peer': { path: '/api/connect-car-peer', method: 'POST' },
+      'scan-and-connect': { path: '/api/scan-and-connect', method: 'POST' },
+      'scan-network': { path: '/api/scan-network', method: 'POST' }
     };
     this.EVENT_NAMES = ['AUDIT_LOG', 'CAR_STATUS', 'CAR_MESSAGE', 'SEQUENCE_STARTED', 'STEP_SENT', 'SEQUENCE_COMPLETED', 'SEQUENCE_ERROR', 'STEP_RETRY'];
   }
@@ -281,5 +283,14 @@ class BackendClient {
     this.transport = null;
     this.retryCount = 0;
     this.connecting = null;
+  }
+
+  /**
+   * Escanea la red y se conecta a un receptor disponible
+   * @param {number} port - Puerto a escanear (default: 80)
+   * @returns {Promise<object>} Resultado del escaneo y conexión
+   */
+  async scanAndConnect(port = 80) {
+    return this.request('scan-and-connect', { port });
   }
 }

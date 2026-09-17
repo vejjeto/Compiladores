@@ -73,6 +73,22 @@ class App {
       this.backendApplyBtn.addEventListener('click', () => this.applyBackendUrl());
     }
 
+    // Auto-switch a receptor cuando un transmisor se conecta a nosotros
+    this.client.onEvent(({ type, data }) => {
+      if (type === 'TRANSMITTER_CONNECTED') {
+        this.switchRole('receiver');
+        this.receiverView.addAuditLog(
+          `Transmisor conectado desde ${data.ip} — modo receptor activado`, 'valid'
+        );
+      }
+      if (type === 'TRANSMITTER_DISCONNECTED') {
+        this.switchRole('transmitter');
+        this.transmitterView.addLog(
+          `Transmisor ${data.ip} desconectado — volviendo a modo transmisor`, 'info'
+        );
+      }
+    });
+
     this.transmitterView.addLog(`Backend configurado: ${this.backendUrl}`, 'info');
     this.transmitterView.addLog('Seleccione un programa de comandos y presione "Ejecutar Programa"', 'info');
     this.receiverView.addAuditLog(`Backend configurado: ${this.backendUrl}`, 'info');
@@ -143,6 +159,8 @@ class App {
     clickBtn('rx-clear-logs-btn');
     clickBtn('rx-verify-btn');
     clickBtn('backend-url-apply');
+    clickBtn('tx-scan-ips-btn');
+    clickBtn('tx-scan-ips-connect-btn');
   }
 
   destroy() {

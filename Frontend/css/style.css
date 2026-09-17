@@ -906,3 +906,47 @@ textarea.form-input {
     width: 100%;
   }
 }
+
+/* === Auto-connect scan === */
+.scan-ips-section {
+  margin-top: 8px;
+}
+
+.scan-ips-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.scan-ips-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.scan-ips-list select {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 0.8em;
+}
+
+.scan-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-mid);
+  border-top-color: var(--phosphor);
+  border-radius: 50%;
+  animation: scan-spin 0.8s linear infinite;
+}
+
+@keyframes scan-spin {
+  to { transform: rotate(360deg); }
+}

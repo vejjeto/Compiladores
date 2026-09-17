@@ -1,6 +1,7 @@
 import { parseCommands } from '../core/parser.js';
 import { CAMERA_IP, CAMERA_STREAM, DEFAULT_CAR_IP, DEFAULT_CAR_PORT } from '../config/constants.js';
 import { tablaService } from '../services/tablaService.js';
+import { scanNetwork, pickRandom } from '../services/networkScanner.js';
 
 async function health(ctx) {
   return {
@@ -313,6 +314,94 @@ async function connectCarPeer(ctx, body) {
   }
 }
 
+async function scanAndConnect(ctx, body) {
+  const port = body.port || 80;
+  const baseIP = body.baseIP;
+  const startOctet = body.startOctet;
+  const endOctet = body.endOctet;
+
+  try {
+    // 1. Escanear la red
+    const scanOpts = { port };
+    if (baseIP !== undefined) scanOpts.baseIP = baseIP;
+    if (startOctet !== undefined) scanOpts.startOctet = startOctet;
+    if (endOctet !== undefined) scanOpts.endOctet = endOctet;
+    const { available, scanned } = await scanNetwork(scanOpts);
+
+    if (available.length === 0) {
+      return {
+        ok: false,
+        status: 200,
+        data: {
+          ok: false,
+          scanned,
+          available,
+          message: 'No se encontraron receptores en la red'
+        },
+        error: null
+      };
+    }
+
+    // 2. Elegir una IP al azar
+    const chosen = pickRandom(available);
+    const receptorURL = `ws://${chosen.ip}:${port}${chosen.path}`;
+
+    // 3. Desconectar peer anterior si existe
+    if (ctx.peerAdapter.connected) {
+      ctx.peerAdapter.disconnect();
+    }
+
+    // 4. Conectar el PeerAdapter
+    await ctx.peerAdapter.connect(receptorURL, 'transmitter');
+
+    return {
+      ok: true,
+      status: 200,
+      data: {
+        ok: true,
+        scanned,
+        available,
+        connectedTo: chosen.ip,
+        receptorURL,
+        message: `Conectado a receptor en ${chosen.ip} (${chosen.path})`
+      },
+      error: null
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      data: {
+        ok: false,
+        error: err.message,
+        message: 'Error durante el escaneo'
+      },
+      error: err.message
+    };
+  }
+}
+
+async function scanNetworkHandler(ctx, body) {
+  const port = body.port || 80;
+  const baseIP = body.baseIP || undefined;
+  try {
+    const { available, scanned, baseIP: resolvedBase } = await scanNetwork({ port, baseIP });
+    return {
+      ok: true,
+      status: 200,
+      data: { ok: true, available, scanned, baseIP: resolvedBase },
+      error: null
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      data: { ok: false, error: err.message, available: [], scanned: [] },
+      error: err.message
+    };
+  }
+}
+
 export const HANDLERS = {
   health,
   rangos,
@@ -328,5 +417,7 @@ export const HANDLERS = {
   'connect-peer': connectPeer,
   'disconnect-peer': disconnectPeer,
   'peer-status': peerStatus,
-  'connect-car-peer': connectCarPeer
+  'connect-car-peer': connectCarPeer,
+  'scan-and-connect': scanAndConnect,
+  'scan-network': scanNetworkHandler
 };

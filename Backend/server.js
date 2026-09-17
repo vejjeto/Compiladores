@@ -301,7 +301,9 @@ async function handleRequest(req, res, ctx) {
         '/api/connect-peer': HANDLERS['connect-peer'],
         '/api/disconnect-peer': HANDLERS['disconnect-peer'],
         '/api/peer-status': HANDLERS['peer-status'],
-        '/api/connect-car-peer': HANDLERS['connect-car-peer']
+        '/api/connect-car-peer': HANDLERS['connect-car-peer'],
+        '/api/scan-and-connect': HANDLERS['scan-and-connect'],
+        '/api/scan-network': HANDLERS['scan-network']
       };
 
       const handler = routeHandlers[reqPath];
@@ -384,6 +386,7 @@ if (isMain) {
     info(COMPONENT, '  GET  /api/audit       - Log de auditoría acumulado');
     info(COMPONENT, '  GET  /api/events      - Eventos SSE (streaming)');
     info(COMPONENT, '  GET  /api/health      - Estado del servidor');
+    info(COMPONENT, '  POST /api/scan-and-connect - Escanear red y conectar al azar');
     info(COMPONENT, '  WS   /ws/api          - API WebSocket híbrida');
     info(COMPONENT, `CORS habilitado (*) - escuchando en todas las interfaces para red local`);
     printAccessUrls();
