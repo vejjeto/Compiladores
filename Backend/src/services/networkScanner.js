@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import logger from '../utils/logger.js';
+import os from 'os';
 
 const SCAN_TIMEOUT = parseInt(process.env.SCAN_TIMEOUT || '3000', 10);
 const PARALLEL_LIMIT = 20;
@@ -11,9 +12,33 @@ const PROBE_PATHS = ['/ws/peer'];
 const DEFAULT_START_OCTET = parseInt(process.env.SCAN_START_OCTET || '100', 10);
 const DEFAULT_END_OCTET = parseInt(process.env.SCAN_END_OCTET || '200', 10);
 
-// Subnet por defecto: 192.168.0 (la usada por todos los proyectos)
-// Se puede sobrescribir con SCAN_BASE_IP o parámetro baseIP
-const DEFAULT_BASE_IP = process.env.SCAN_BASE_IP || '192.168.0';
+/**
+ * Detecta la subred local automáticamente desde las interfaces de red
+ * Retorna los primeros 3 octetos (ej: '192.168.1', '10.0.0', '172.16.5')
+ * Si no encuentra interfaces válidas, fallback a '192.168.0'
+ */
+function getDefaultBaseIP() {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          const parts = iface.address.split('.');
+          if (parts.length === 4) {
+            return `${parts[0]}.${parts[1]}.${parts[2]}`;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // Silencioso, usa fallback
+  }
+  return '192.168.0';
+}
+
+// Subnet por defecto: detección automática de la subred local
+// Se puede sobrescribir con SCAN_BASE_IP env var o parámetro baseIP
+const DEFAULT_BASE_IP = process.env.SCAN_BASE_IP || getDefaultBaseIP();
 
 /**
  * Puerto WebSocket por defecto para escaneo (80, no el PORT del server)

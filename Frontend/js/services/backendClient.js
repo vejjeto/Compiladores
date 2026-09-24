@@ -313,12 +313,12 @@ class BackendClient {
    * Escanea la red buscando receptores
    * @param {object} opts - Opciones de escaneo
    * @param {number} opts.port - Puerto a escanear (default: 80)
-   * @param {string} opts.baseIP - Subnet base (ej: "192.168.0", default: "192.168.0")
+   * @param {string} opts.baseIP - Subnet base (ej: "192.168.0"). Si no se proporciona, el backend auto-detecta la subred local.
    * @param {number} opts.startOctet - Octeto inicial (default: 100)
    * @param {number} opts.endOctet - Octeto final (default: 200)
    * @returns {Promise<object>} Resultado del escaneo
    */
-  async scanNetwork({ port = 80, baseIP = '192.168.0', startOctet = 100, endOctet = 200 } = {}) {
+  async scanNetwork({ port = 80, baseIP, startOctet = 100, endOctet = 200 } = {}) {
     // 30s timeout para scan completo (101 IPs × 3s con 20 paralelo = ~16s + margen)
     return this.request('scan-network', { port, baseIP, startOctet, endOctet }, 30000);
   }

@@ -415,7 +415,10 @@ if (isMain) {
 
     // Escaneo de red al iniciar — muestra receptores activos en la terminal
     // IMPORTANTE: puerto 80 fijo, que es donde corren TODOS los proyectos (Jhonier, Santiago, Robert, Andres)
-    scanNetwork({ port: 80 }).then(({ available, baseIP }) => {
+    // Auto-detecta la subred local en lugar de hardcodear 192.168.0
+    const localIPs = getLocalIpv4Addresses();
+    const autoBaseIP = localIPs[0] ? localIPs[0].split('.').slice(0, 3).join('.') : '192.168.0';
+    scanNetwork({ port: 80, baseIP: autoBaseIP }).then(({ available, baseIP }) => {
       console.log('');
       console.log(`📡 Red detectada: ${baseIP}.0/24`);
       console.log('─────────────────────────────────');

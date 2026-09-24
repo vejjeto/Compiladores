@@ -679,8 +679,8 @@ class TransmitterView {
     this.scanIpsList.classList.add('hidden');
 
     try {
-      // Jhonier style: default 192.168.0, no subnet input needed
-      const result = await this.client.scanNetwork({ baseIP: '192.168.0' });
+      // Auto-detecta la subred local (backend detecta automáticamente)
+      const result = await this.client.scanNetwork({});
 
       this.scanIpsLoading.classList.add('hidden');
 
@@ -761,7 +761,7 @@ class TransmitterView {
 
     // No hay resultados en dropdown → hacer scan propio
     try {
-      const result = await this.client.scanNetwork({ baseIP: '192.168.0' });
+      const result = await this.client.scanNetwork({});
       if (!result.ok || !result.data.available.length) {
         this.addLog('No hay receptores para conectar aleatoriamente', 'warn');
         return;
