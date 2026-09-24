@@ -4,8 +4,16 @@ import os from 'os';
 
 const SCAN_TIMEOUT = parseInt(process.env.SCAN_TIMEOUT || '3000', 10);
 const PARALLEL_LIMIT = 20;
-// Solo el path real de conexión para evitar falsos positivos
-const PROBE_PATHS = ['/ws/peer'];
+// Rutas WebSocket estándar usadas por todos los proyectos (Diego, Santiago, Robert, Andres, Jhonier)
+// Se prueban en orden de prioridad: las más comunes primero
+const PROBE_PATHS = [
+  '/transmisor',  // Santiago, Robert, Andres, Jhonier, Diego
+  '/ws',          // Santiago, Robert, Diego
+  '/ws/peer',     // Diego (compatibilidad)
+  '/monitor',     // Santiago, Robert, Andres, Diego
+  '/ws-stomp',    // Jhonier
+  '/'             // Santiago (fallback)
+];
 
 // Rango por defecto optimizado: 100-200 (101 IPs = ~16s vs 39s del rango completo)
 // Cubre la mayoría de dispositivos domésticos. Se puede limitar con SCAN_START_OCTET y SCAN_END_OCTET.
