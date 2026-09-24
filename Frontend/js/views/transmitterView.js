@@ -38,6 +38,10 @@ class TransmitterView {
     this.scanIpsList = document.getElementById('tx-scan-ips-list');
     this.scanIpsSelect = document.getElementById('tx-scan-ips-select');
     this.scanIpsConnectBtn = document.getElementById('tx-scan-ips-connect-btn');
+    this.scanRandomBtn = document.getElementById('tx-scan-random-btn');
+    this.scanRandomConnectBtn = document.getElementById('tx-scan-random-connect-btn');
+    this.misDireccionesSection = document.getElementById('tx-mis-direcciones-section');
+    this.misDireccionesList = document.getElementById('tx-mis-direcciones-list');
 
     this.carUrlInput = document.getElementById('tx-esp-url');
     this.carConnectBtn = document.getElementById('tx-connect-car-btn');
@@ -71,6 +75,12 @@ class TransmitterView {
     if (this.scanIpsConnectBtn) {
       this.scanIpsConnectBtn.addEventListener('click', () => this.connectFromDropdown());
     }
+    if (this.scanRandomBtn) {
+      this.scanRandomBtn.addEventListener('click', () => this.connectRandom());
+    }
+    if (this.scanRandomConnectBtn) {
+      this.scanRandomConnectBtn.addEventListener('click', () => this.connectRandomFromDropdown());
+    }
 
     if (this.carConnectBtn) this.carConnectBtn.addEventListener('click', () => this.connectCar());
     if (this.carDisconnectBtn) this.carDisconnectBtn.addEventListener('click', () => this.disconnectCar());
@@ -90,6 +100,32 @@ class TransmitterView {
       this.client.onEvent(({type, data}) => this._handleServerEvent(type, data));
     }
     this.client.connect();
+    // Cargar "Mis direcciones" al conectar
+    this.client.connect().then(() => this.loadMisDirecciones()).catch(() => {});
+  }
+
+  async loadMisDirecciones() {
+    if (!this.misDireccionesSection || !this.misDireccionesList) return;
+    try {
+      const dirs = await this.client.getMisDirecciones();
+      if (dirs.length === 0) return;
+      this.misDireccionesList.innerHTML = dirs.map(d => `
+        <div class="mis-direccion-item">
+          <div class="mis-direccion-header">
+            <span class="mis-direccion-ip">${d.ip}</span>
+            <span class="mis-direccion-interface">(${d.interface})</span>
+          </div>
+          <div class="mis-direccion-urls">
+            <code title="Click para copiar" onclick="navigator.clipboard.writeText(this.textContent); this.title='¡Copiado!'">Transmisor: ${d.wsTransmisor}</code>
+            <code title="Click para copiar" onclick="navigator.clipboard.writeText(this.textContent); this.title='¡Copiado!'">Peer: ${d.wsPeer}</code>
+            <code title="Click para copiar" onclick="navigator.clipboard.writeText(this.textContent); this.title='¡Copiado!'">API: ${d.wsApi}</code>
+          </div>
+        </div>
+      `).join('');
+      this.misDireccionesSection.style.display = 'block';
+    } catch (e) {
+      // Silencioso
+    }
   }
 
   _handleServerEvent(type, data) {
@@ -147,6 +183,7 @@ class TransmitterView {
     // Manejar IP del PC
     if (message.startsWith('PC_IP:')) {
       const pcIP = message.substring(6);
+      this.myIP = pcIP; // Guardar para filtrar en scan
       if (this.pcIpDisplay) {
         this.pcIpDisplay.textContent = 'PC: ' + pcIP;
       }
@@ -642,21 +679,43 @@ class TransmitterView {
     this.scanIpsList.classList.add('hidden');
 
     try {
-      const result = await this.client.request('scan-network', {});
+      // Jhonier style: default 192.168.0, no subnet input needed
+      const result = await this.client.scanNetwork({ baseIP: '192.168.0' });
 
       this.scanIpsLoading.classList.add('hidden');
 
       if (result.ok && result.data.available.length > 0) {
         this.scanIpsList.classList.remove('hidden');
         const baseIP = result.data.baseIP || '192.168.0';
-        this.scanIpsSelect.innerHTML = `<option value="">-- ${result.data.available.length} receptores en ${baseIP}.x --</option>`;
-        for (const { ip, path } of result.data.available) {
+
+        // Filtrar propia IP para no conectarse a sí mismo
+        const filtered = result.data.available.filter(d => d.ip !== this.myIP);
+        const ownIPFound = result.data.available.some(d => d.ip === this.myIP);
+        if (ownIPFound) {
+          this.addLog(`IP propia (${this.myIP}) filtrada del escaneo`, 'info');
+        }
+
+        // Separar disponibles y ocupados (si el backend envía occupied)
+        const disponibles = filtered.filter(d => !d.occupied);
+        const ocupados = filtered.filter(d => d.occupied);
+
+        let html = `<option value="">-- ${filtered.length} receptores en ${baseIP}.x`;
+        if (disponibles.length !== filtered.length) {
+          html += ` (${disponibles.length} libres, ${ocupados.length} ocupados)`;
+        }
+        html += ` --</option>`;
+
+        // Primero disponibles, luego ocupados
+        const ordenados = [...disponibles, ...ocupados];
+        for (const device of ordenados) {
           const opt = document.createElement('option');
-          opt.value = JSON.stringify({ ip, path });
-          opt.textContent = `${ip}  (${path})`;
+          opt.value = JSON.stringify({ ip: device.ip, path: device.path });
+          const badge = device.occupied ? ' 🔴 ocupado' : ' 🟢 libre';
+          opt.textContent = `${device.ip}  (${device.path})${badge}`;
+          if (device.occupied) opt.disabled = true;
           this.scanIpsSelect.appendChild(opt);
         }
-        this.addLog(`Encontrados ${result.data.available.length} receptores en ${baseIP}.x`, 'valid');
+        this.addLog(`Encontrados ${filtered.length} receptores en ${baseIP}.x (${disponibles.length} libres, ${ocupados.length} ocupados)`, 'valid');
       } else {
         this.addLog('No se encontraron receptores en la red', 'warn');
         this.scanIpsList.classList.add('hidden');
@@ -679,6 +738,78 @@ class TransmitterView {
     const port = 80;
     this.peerUrlInput.value = `ws://${ip}:${port}${path}`;
     this.connectPeer();
+  }
+
+  /**
+   * Conecta a un receptor aleatorio de los encontrados (solo libres si hay)
+   * Estilo Jhonier: 🎲 Random from available → auto-connect
+   */
+  async connectRandom() {
+    // Primero: si hay resultados en el dropdown, usa esos (Jhonier style)
+    const dropdownOptions = Array.from(this.scanIpsSelect.options).slice(1); // skip placeholder
+    const disponiblesEnDropdown = dropdownOptions.filter(opt => !opt.disabled);
+    
+    if (disponiblesEnDropdown.length > 0) {
+      // Usar lo que ya está en el dropdown (usuario ya escaneó)
+      const elegido = disponiblesEnDropdown[Math.floor(Math.random() * disponiblesEnDropdown.length)];
+      const { ip, path } = JSON.parse(elegido.value);
+      this.addLog(`🎲 Random (desde lista): ${ip} (${path})`, 'info');
+      this.peerUrlInput.value = `ws://${ip}:80${path}`;
+      this.connectPeer();
+      return;
+    }
+
+    // No hay resultados en dropdown → hacer scan propio
+    try {
+      const result = await this.client.scanNetwork({ baseIP: '192.168.0' });
+      if (!result.ok || !result.data.available.length) {
+        this.addLog('No hay receptores para conectar aleatoriamente', 'warn');
+        return;
+      }
+      // Filtrar propia IP y solo libres
+      const filtered = result.data.available.filter(d => d.ip !== this.myIP);
+      const libres = filtered.filter(d => !d.occupied);
+      const candidatos = libres.length > 0 ? libres : filtered;
+      if (!candidatos.length) {
+        this.addLog('No hay receptores libres para conectar aleatoriamente', 'warn');
+        return;
+      }
+      // Barajar y probar hasta 3
+      const shuffled = [...candidatos].sort(() => Math.random() - 0.5);
+      for (const elegido of shuffled.slice(0, 3)) {
+        this.addLog(`🎲 Random: intentando ${elegido.ip} (${elegido.path})...`, 'info');
+        this.peerUrlInput.value = `ws://${elegido.ip}:80${elegido.path}`;
+        try {
+          await this.connectPeer();
+          if (this.peerStatus.classList.contains('peer-connected')) {
+            this.addLog(`🎲 Random: conectado a ${elegido.ip}`, 'valid');
+            return;
+          }
+        } catch (e) {
+          this.addLog(`🎲 ${elegido.ip} falló: ${e.message}, probando siguiente...`, 'warn');
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+      this.addLog('🎲 Random: ninguno de los 3 intentos conectó', 'warn');
+    } catch (err) {
+      this.addLog(`Error en random connect: ${err.message}`, 'invalid');
+    }
+  }
+
+  /**
+   * Random connect desde el dropdown (después de escanear)
+   */
+  async connectRandomFromDropdown() {
+    const options = Array.from(this.scanIpsSelect.options).slice(1); // skip first placeholder
+    const libres = options.filter(opt => !opt.disabled);
+    const candidatos = libres.length > 0 ? libres : options;
+    if (!candidatos.length) {
+      this.addLog('No hay receptores en la lista', 'warn');
+      return;
+    }
+    const elegido = candidatos[Math.floor(Math.random() * candidatos.length)];
+    this.scanIpsSelect.value = elegido.value;
+    this.connectFromDropdown();
   }
 
   clearInput() {

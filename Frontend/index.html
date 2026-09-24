@@ -36,17 +36,23 @@
   </nav>
 
   <div class="view active" id="view-transmitter">
-    <div class="panel">
-      <div class="panel-header">
-        <h2>Consola Operadora <span class="badge badge-transmitter">TX</span></h2>
-        <div class="status-indicator" id="tx-status">
-          <span class="status-dot status-disconnected"></span>
-          <span>Desconectado</span>
-        </div>
-        <div class="pc-ip-display" id="tx-pc-ip">PC: ---</div>
-      </div>
-      <div class="panel-body">
-        <div class="peer-section">
+<div class="panel">
+          <div class="panel-header">
+            <h2>Consola Operadora <span class="badge badge-transmitter">TX</span></h2>
+            <div class="status-indicator" id="tx-status">
+              <span class="status-dot status-disconnected"></span>
+              <span>Desconectado</span>
+            </div>
+            <div class="pc-ip-display" id="tx-pc-ip">PC: ---</div>
+          </div>
+          <div class="panel-body">
+            <div class="mis-direcciones-section" id="tx-mis-direcciones-section" style="display: none;">
+              <details class="mis-direcciones-details">
+                <summary>📡 Mis direcciones WebSocket (para que otros se conecten a mí)</summary>
+                <div class="mis-direcciones-list" id="tx-mis-direcciones-list"></div>
+              </details>
+            </div>
+            <div class="peer-section">
           <label>Conexión con Receptor Remoto (WebSocket)</label>
           <div class="btn-group">
             <input
@@ -61,7 +67,10 @@
           </div>
           <div class="peer-status" id="tx-peer-status">Sin conexión remota (Modo Local)</div>
           <div class="scan-ips-section">
-            <button class="btn btn-secondary" id="tx-scan-ips-btn">&#128269; Buscar IPs en la red</button>
+            <div class="scan-ips-controls">
+              <button class="btn btn-secondary" id="tx-scan-ips-btn">&#128269; Buscar IPs</button>
+              <button class="btn btn-warning" id="tx-scan-random-btn" title="Conectar a receptor aleatorio disponible">🎲 Random</button>
+            </div>
             <div class="scan-ips-loading hidden" id="tx-scan-ips-loading">
               <div class="scan-spinner"></div>
               <span>Escaneando...</span>
@@ -70,7 +79,10 @@
               <select class="form-input" id="tx-scan-ips-select">
                 <option value="">-- Seleccioná un receptor --</option>
               </select>
-              <button class="btn btn-primary btn-sm" id="tx-scan-ips-connect-btn">Conectar</button>
+              <div class="scan-ips-actions">
+                <button class="btn btn-primary btn-sm" id="tx-scan-ips-connect-btn">Conectar</button>
+                <button class="btn btn-warning btn-sm" id="tx-scan-random-connect-btn" title="Conectar a receptor aleatorio disponible" style="display: none;">🎲 Random</button>
+              </div>
             </div>
           </div>
         </div>

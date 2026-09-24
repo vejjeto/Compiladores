@@ -13,6 +13,7 @@ import * as encriptador from './src/core/encriptador.js';
 import { HANDLERS } from './src/http/handlers.js';
 import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
 import { PeerAdapter } from './src/adapters/peerAdapter.js';
+import { scanNetwork } from './src/services/networkScanner.js';
 
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 80;
@@ -243,14 +244,35 @@ async function handleRequest(req, res, ctx) {
       return respond(res, 200, { ok: true, status: 200, data: result, error: null });
     }
 
-    if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
-      return respond(res, 200, {
-        tipo: 'estado',
-        robot: ctx.carService.connected ? 'conectado' : 'desconectado',
-        robotUrl: ctx.carService.address ? `ws://${ctx.carService.address}/ws` : 'ws://192.168.0.50/ws',
-        transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
-        monitores: ctx.wsServerAdapter?.wss?.clients?.size || 0
-      });
+    // Helper para obtener todas las IPs locales con URLs WS
+function getMisDirecciones(port) {
+  const ifaces = os.networkInterfaces();
+  const direcciones = [];
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        direcciones.push({
+          ip: iface.address,
+          interface: name,
+          wsTransmisor: `ws://${iface.address}:${port}/transmisor`,
+          wsPeer: `ws://${iface.address}:${port}/ws/peer`,
+          wsApi: `ws://${iface.address}:${port}/ws/api`
+        });
+      }
+    }
+  }
+  return direcciones.length > 0 ? direcciones : [{ ip: '127.0.0.1', interface: 'loopback', wsTransmisor: `ws://127.0.0.1:${port}/transmisor`, wsPeer: `ws://127.0.0.1:${port}/ws/peer`, wsApi: `ws://127.0.0.1:${port}/ws/api` }];
+}
+
+if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
+  return respond(res, 200, {
+    tipo: 'estado',
+    robot: ctx.carService.connected ? 'conectado' : 'desconectado',
+    robotUrl: ctx.carService.address ? `ws://${ctx.carService.address}/ws` : 'ws://192.168.0.50/ws',
+    transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
+    monitores: ctx.wsServerAdapter?.wss?.clients?.size || 0,
+    misDirecciones: getMisDirecciones(PORT)
+  });
     }
 
     if (method === 'POST') {
@@ -390,6 +412,26 @@ if (isMain) {
     info(COMPONENT, '  WS   /ws/api          - API WebSocket híbrida');
     info(COMPONENT, `CORS habilitado (*) - escuchando en todas las interfaces para red local`);
     printAccessUrls();
+
+    // Escaneo de red al iniciar — muestra receptores activos en la terminal
+    // IMPORTANTE: puerto 80 fijo, que es donde corren TODOS los proyectos (Jhonier, Santiago, Robert, Andres)
+    scanNetwork({ port: 80 }).then(({ available, baseIP }) => {
+      console.log('');
+      console.log(`📡 Red detectada: ${baseIP}.0/24`);
+      console.log('─────────────────────────────────');
+
+      if (available.length === 0) {
+        console.log('  ⚠️  No se encontraron receptores en la red');
+      } else {
+        for (const { ip, path } of available) {
+          console.log(`  ✅ ${ip}  (receptor en ${path})`);
+        }
+      }
+
+      console.log('─────────────────────────────────');
+      console.log(`  ${available.length} receptor(es) encontrado(s)`);
+      console.log('');
+    }).catch(() => {});
   });
 
   function closeAll() {

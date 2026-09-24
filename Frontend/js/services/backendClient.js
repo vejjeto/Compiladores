@@ -33,7 +33,8 @@ class BackendClient {
       'peer-status': { path: '/api/peer-status', method: 'GET' },
       'connect-car-peer': { path: '/api/connect-car-peer', method: 'POST' },
       'scan-and-connect': { path: '/api/scan-and-connect', method: 'POST' },
-      'scan-network': { path: '/api/scan-network', method: 'POST' }
+      'scan-network': { path: '/api/scan-network', method: 'POST' },
+      'mis-direcciones': { path: '/api/estado', method: 'GET' }
     };
     this.EVENT_NAMES = ['AUDIT_LOG', 'CAR_STATUS', 'CAR_MESSAGE', 'SEQUENCE_STARTED', 'STEP_SENT', 'SEQUENCE_COMPLETED', 'SEQUENCE_ERROR', 'STEP_RETRY'];
   }
@@ -189,35 +190,35 @@ class BackendClient {
     this.connect();
   }
 
-  async request(action, data = {}) {
+  async request(action, data = {}, timeout = 10000) {
     if (this.mode === 'http') {
-      return this._httpRequest(action, data);
+      return this._httpRequest(action, data, timeout);
     }
     if (this.transport === 'ws') {
-      return this._wsRequest(action, data);
+      return this._wsRequest(action, data, timeout);
     }
     if (this.transport === 'http') {
-      return this._httpRequest(action, data);
+      return this._httpRequest(action, data, timeout);
     }
     if (this.ws === null && this.es === null) {
       await this.connect();
     }
     if (this.transport === 'ws') {
-      return this._wsRequest(action, data);
+      return this._wsRequest(action, data, timeout);
     }
     if (this.transport === 'http') {
-      return this._httpRequest(action, data);
+      return this._httpRequest(action, data, timeout);
     }
     return Promise.reject(new Error('WS no disponible'));
   }
 
-  _wsRequest(action, data) {
+  _wsRequest(action, data, timeout = 10000) {
     return new Promise((resolve, reject) => {
       const requestId = 'r' + (this.requestSeq++);
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error('Timeout'));
-      }, 10000);
+      }, timeout);
       this.pending.set(requestId, { resolve, reject, timer });
       try {
         this.ws.send(JSON.stringify({ v: 1, type: 'request', action, data, requestId }));
@@ -229,15 +230,24 @@ class BackendClient {
     });
   }
 
-  async _httpRequest(action, data) {
+  async _httpRequest(action, data, timeout = 10000) {
     const route = this.ACTION_ROUTES[action];
     const url = this.baseUrl + route.path;
     let options;
     if (route.method === 'POST') {
       options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
     }
-    const res = await fetch(url, options);
-    return { ok: res.ok, status: res.status, data: await res.json(), error: null };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      return { ok: res.ok, status: res.status, data: await res.json(), error: null };
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('Timeout');
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   onEvent(cb) {
@@ -287,10 +297,38 @@ class BackendClient {
 
   /**
    * Escanea la red y se conecta a un receptor disponible
-   * @param {number} port - Puerto a escanear (default: 80)
+   * @param {object} opts - Opciones de escaneo
+   * @param {number} opts.port - Puerto a escanear (default: 80)
+   * @param {string} opts.baseIP - Subnet base (ej: "192.168.0", default: "192.168.0")
+   * @param {number} opts.startOctet - Octeto inicial (default: 1)
+   * @param {number} opts.endOctet - Octeto final (default: 254)
    * @returns {Promise<object>} Resultado del escaneo y conexión
    */
-  async scanAndConnect(port = 80) {
-    return this.request('scan-and-connect', { port });
+  async scanAndConnect({ port = 80, baseIP = '192.168.0', startOctet, endOctet } = {}) {
+    // 30s timeout para scan + connect
+    return this.request('scan-and-connect', { port, baseIP, startOctet, endOctet }, 30000);
+  }
+
+  /**
+   * Escanea la red buscando receptores
+   * @param {object} opts - Opciones de escaneo
+   * @param {number} opts.port - Puerto a escanear (default: 80)
+   * @param {string} opts.baseIP - Subnet base (ej: "192.168.0", default: "192.168.0")
+   * @param {number} opts.startOctet - Octeto inicial (default: 100)
+   * @param {number} opts.endOctet - Octeto final (default: 200)
+   * @returns {Promise<object>} Resultado del escaneo
+   */
+  async scanNetwork({ port = 80, baseIP = '192.168.0', startOctet = 100, endOctet = 200 } = {}) {
+    // 30s timeout para scan completo (101 IPs × 3s con 20 paralelo = ~16s + margen)
+    return this.request('scan-network', { port, baseIP, startOctet, endOctet }, 30000);
+  }
+
+  /**
+   * Obtiene las direcciones WebSocket locales de este equipo
+   * @returns {Promise<Array>} Array de objetos { ip, interface, wsTransmisor, wsPeer, wsApi }
+   */
+  async getMisDirecciones() {
+    const result = await this.request('mis-direcciones', {});
+    return result.ok && result.data?.misDirecciones ? result.data.misDirecciones : [];
   }
 }

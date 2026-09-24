@@ -1,51 +1,47 @@
 import { WebSocket } from 'ws';
-import { networkInterfaces } from 'os';
 import logger from '../utils/logger.js';
 
-const SCAN_TIMEOUT = 800;
+const SCAN_TIMEOUT = parseInt(process.env.SCAN_TIMEOUT || '3000', 10);
 const PARALLEL_LIMIT = 20;
-const PROBE_PATHS = ['/transmisor', '/ws', '/ws/peer'];
+// Solo el path real de conexión para evitar falsos positivos
+const PROBE_PATHS = ['/ws/peer'];
+
+// Rango por defecto optimizado: 100-200 (101 IPs = ~16s vs 39s del rango completo)
+// Cubre la mayoría de dispositivos domésticos. Se puede limitar con SCAN_START_OCTET y SCAN_END_OCTET.
+const DEFAULT_START_OCTET = parseInt(process.env.SCAN_START_OCTET || '100', 10);
+const DEFAULT_END_OCTET = parseInt(process.env.SCAN_END_OCTET || '200', 10);
+
+// Subnet por defecto: 192.168.0 (la usada por todos los proyectos)
+// Se puede sobrescribir con SCAN_BASE_IP o parámetro baseIP
+const DEFAULT_BASE_IP = process.env.SCAN_BASE_IP || '192.168.0';
 
 /**
- * Detecta el subnet local (ej: "192.168.0" o "192.168.1")
+ * Puerto WebSocket por defecto para escaneo (80, no el PORT del server)
+ * Los proyectos corren en puerto 80 por defecto
  */
-function detectLocalSubnet() {
-  const interfaces = networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        const parts = iface.address.split('.');
-        if (parts.length === 4) {
-          return `${parts[0]}.${parts[1]}.${parts[2]}`;
-        }
-      }
-    }
-  }
-  return '192.168.0';
-}
+const DEFAULT_SCAN_PORT = 80;
 
 /**
  * Escanea un rango de IPs buscando receptores activos en cualquier path
  * @param {object} opts
- * @param {string} opts.baseIP - IP base (default: detecta automáticamente)
+ * @param {string} opts.baseIP - IP base (default: 192.168.0, sobrescribible con SCAN_BASE_IP env)
  * @param {number} opts.startOctet - octeto inicial (default: 1)
  * @param {number} opts.endOctet - octeto final (default: 254)
- * @param {number} opts.port - puerto WebSocket (default: 80)
+ * @param {number} opts.port - puerto WebSocket (default: 80, puerto estándar de los proyectos)
  * @returns {Promise<{ available: {ip:string, path:string}[], scanned: string[], baseIP: string }>}
  */
 export async function scanNetwork({
-  baseIP,
-  startOctet = 1,
-  endOctet = 254,
-  port = 80,
+  baseIP = DEFAULT_BASE_IP,
+  startOctet = DEFAULT_START_OCTET,
+  endOctet = DEFAULT_END_OCTET,
+  port = DEFAULT_SCAN_PORT,
 } = {}) {
-  const resolvedBase = baseIP || detectLocalSubnet();
   const ips = [];
   for (let i = startOctet; i <= endOctet; i++) {
-    ips.push(`${resolvedBase}.${i}`);
+    ips.push(`${baseIP}.${i}`);
   }
 
-  logger.info('SCANNER', `Escaneando ${ips.length} IPs en ${resolvedBase}.${startOctet}-${endOctet} (paths: ${PROBE_PATHS.join(', ')})`);
+  logger.info('SCANNER', `Escaneando ${ips.length} IPs en ${baseIP}.${startOctet}-${endOctet} (paths: ${PROBE_PATHS.join(', ')})`);
 
   const available = [];
   const scanned = [];
@@ -66,7 +62,7 @@ export async function scanNetwork({
     });
   }
 
-  return { available, scanned, baseIP: resolvedBase };
+  return { available, scanned, baseIP };
 }
 
 /**
