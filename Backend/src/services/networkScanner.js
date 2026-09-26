@@ -79,6 +79,7 @@ const DEFAULT_BASE_IP = process.env.SCAN_BASE_IP || getPrimarySegment();
  * @param {number} opts.startOctet - Octeto inicial (default: 1)
  * @param {number} opts.endOctet - Octeto final (default: 254)
  * @param {number} opts.port - Puerto WebSocket (default: 80)
+ * @param {string} opts.excludeIP - IP a excluir de los resultados (ej: IP del carro)
  * @returns {Promise<{ available: {ip:string, path:string, segment:string}[], scanned: string[], segments: string[], baseIP: string }>}
  */
 export async function scanNetwork({
@@ -86,6 +87,7 @@ export async function scanNetwork({
   startOctet = DEFAULT_START_OCTET,
   endOctet = DEFAULT_END_OCTET,
   port = DEFAULT_SCAN_PORT,
+  excludeIP,
 } = {}) {
   // Normalizar baseIP a array de segmentos
   const segments = Array.isArray(baseIP) ? baseIP : [baseIP];
@@ -119,8 +121,13 @@ export async function scanNetwork({
         const ip = batch[index];
         allScanned.push(ip);
         if (result.status === 'fulfilled' && result.value) {
-          allAvailable.push({ ip, path: result.value, segment });
-          logger.info('SCANNER', `${ip}:${port}${result.value} activo [${segment}]`);
+          // Excluir IP del carro si se especificó
+          if (excludeIP && ip === excludeIP) {
+            logger.info('SCANNER', `${ip}:${port}${result.value} activo [${segment}] - EXCLUIDO (IP del carro)`);
+          } else {
+            allAvailable.push({ ip, path: result.value, segment });
+            logger.info('SCANNER', `${ip}:${port}${result.value} activo [${segment}]`);
+          }
         }
       });
     }

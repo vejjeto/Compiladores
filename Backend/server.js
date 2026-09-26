@@ -268,7 +268,7 @@ if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
   return respond(res, 200, {
     tipo: 'estado',
     robot: ctx.carService.connected ? 'conectado' : 'desconectado',
-    robotUrl: ctx.carService.address ? `ws://${ctx.carService.address}/ws` : 'ws://192.168.0.50/ws',
+    robotUrl: ctx.carService.address ? `ws://${ctx.carService.address}/ws` : `ws://${DEFAULT_CAR_IP}/ws`,
     transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
     monitores: ctx.wsServerAdapter?.wss?.clients?.size || 0,
     misDirecciones: getMisDirecciones(PORT)
@@ -416,7 +416,7 @@ if (isMain) {
     // Escaneo de red al iniciar — muestra receptores activos en la terminal
     // IMPORTANTE: Escanea TODOS los segmentos propios detectados (1-254 c/u)
     const ownSegments = getOwnSegments();
-    const autoBaseIP = ownSegments[0] || '192.168.0';
+    const autoBaseIP = ownSegments[0] || DEFAULT_CAR_IP.split('.').slice(0, 3).join('.');
     
     console.log(`🔍 Iniciando escaneo de ${ownSegments.length} segmento(s) propio(s): ${ownSegments.join(', ')}`);
     

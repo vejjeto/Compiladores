@@ -33,7 +33,7 @@ export async function runDiagnostico(ctx = {}) {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  const CAR_IP = process.argv[2] || '192.168.0.50';
+  const CAR_IP = process.argv[2] || process.env.CAR_IP || '192.168.10.50';
   const CAR_PORT = process.argv[3] || 80;
   const WS_URL = `ws://${CAR_IP}:${CAR_PORT}/ws`;
 

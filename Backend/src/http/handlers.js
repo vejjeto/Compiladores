@@ -326,6 +326,8 @@ async function scanAndConnect(ctx, body) {
     if (baseIP !== undefined) scanOpts.baseIP = baseIP;
     if (startOctet !== undefined) scanOpts.startOctet = startOctet;
     if (endOctet !== undefined) scanOpts.endOctet = endOctet;
+    // Excluir la IP del carro del escaneo
+    scanOpts.excludeIP = ctx.carService.address ? ctx.carService.address.split(':')[0] : undefined;
     const { available, scanned } = await scanNetwork(scanOpts);
 
     if (available.length === 0) {
@@ -390,6 +392,8 @@ async function scanNetworkHandler(ctx, body) {
     const scanOpts = { port, baseIP };
     if (startOctet !== undefined) scanOpts.startOctet = startOctet;
     if (endOctet !== undefined) scanOpts.endOctet = endOctet;
+    // Excluir la IP del carro del escaneo
+    scanOpts.excludeIP = ctx.carService.address ? ctx.carService.address.split(':')[0] : undefined;
     const { available, scanned, baseIP: resolvedBase, segments } = await scanNetwork(scanOpts);
     return {
       ok: true,
