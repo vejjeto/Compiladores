@@ -384,12 +384,17 @@ async function scanAndConnect(ctx, body) {
 async function scanNetworkHandler(ctx, body) {
   const port = body.port || 80;
   const baseIP = body.baseIP || undefined;
+  const startOctet = body.startOctet;
+  const endOctet = body.endOctet;
   try {
-    const { available, scanned, baseIP: resolvedBase } = await scanNetwork({ port, baseIP });
+    const scanOpts = { port, baseIP };
+    if (startOctet !== undefined) scanOpts.startOctet = startOctet;
+    if (endOctet !== undefined) scanOpts.endOctet = endOctet;
+    const { available, scanned, baseIP: resolvedBase, segments } = await scanNetwork(scanOpts);
     return {
       ok: true,
       status: 200,
-      data: { ok: true, available, scanned, baseIP: resolvedBase },
+      data: { ok: true, available, scanned, baseIP: resolvedBase, segments },
       error: null
     };
   } catch (err) {

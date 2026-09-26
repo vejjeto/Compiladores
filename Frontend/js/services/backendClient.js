@@ -296,31 +296,31 @@ class BackendClient {
   }
 
   /**
-   * Escanea la red y se conecta a un receptor disponible
+   * Escanea la red y se conecta a un receptor aleatorio
    * @param {object} opts - Opciones de escaneo
    * @param {number} opts.port - Puerto a escanear (default: 80)
-   * @param {string} opts.baseIP - Subnet base (ej: "192.168.0", default: "192.168.0")
+   * @param {string|string[]} opts.baseIP - Subnet base(s). Si no se proporciona, backend auto-detecta.
    * @param {number} opts.startOctet - Octeto inicial (default: 1)
    * @param {number} opts.endOctet - Octeto final (default: 254)
    * @returns {Promise<object>} Resultado del escaneo y conexión
    */
-  async scanAndConnect({ port = 80, baseIP = '192.168.0', startOctet, endOctet } = {}) {
-    // 30s timeout para scan + connect
-    return this.request('scan-and-connect', { port, baseIP, startOctet, endOctet }, 30000);
+  async scanAndConnect({ port = 80, baseIP, startOctet = 1, endOctet = 254 } = {}) {
+    // 60s timeout para scan + connect
+    return this.request('scan-and-connect', { port, baseIP, startOctet, endOctet }, 60000);
   }
 
   /**
    * Escanea la red buscando receptores
    * @param {object} opts - Opciones de escaneo
    * @param {number} opts.port - Puerto a escanear (default: 80)
-   * @param {string} opts.baseIP - Subnet base (ej: "192.168.0"). Si no se proporciona, el backend auto-detecta la subred local.
-   * @param {number} opts.startOctet - Octeto inicial (default: 100)
-   * @param {number} opts.endOctet - Octeto final (default: 200)
+   * @param {string|string[]} opts.baseIP - Subnet base(s). Si no se proporciona, backend auto-detecta.
+   * @param {number} opts.startOctet - Octeto inicial (default: 1)
+   * @param {number} opts.endOctet - Octeto final (default: 254)
    * @returns {Promise<object>} Resultado del escaneo
    */
-  async scanNetwork({ port = 80, baseIP, startOctet = 100, endOctet = 200 } = {}) {
-    // 30s timeout para scan completo (101 IPs × 3s con 20 paralelo = ~16s + margen)
-    return this.request('scan-network', { port, baseIP, startOctet, endOctet }, 30000);
+  async scanNetwork({ port = 80, baseIP, startOctet = 1, endOctet = 254 } = {}) {
+    // 60s timeout para scan multi-segmento (máx 254 IPs × 6 paths × 2s con 20 paralelo = ~38s + margen)
+    return this.request('scan-network', { port, baseIP, startOctet, endOctet }, 60000);
   }
 
   /**

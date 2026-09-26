@@ -13,7 +13,7 @@ import * as encriptador from './src/core/encriptador.js';
 import { HANDLERS } from './src/http/handlers.js';
 import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
 import { PeerAdapter } from './src/adapters/peerAdapter.js';
-import { scanNetwork } from './src/services/networkScanner.js';
+import { scanNetwork, getOwnSegments } from './src/services/networkScanner.js';
 
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 80;
@@ -414,25 +414,34 @@ if (isMain) {
     printAccessUrls();
 
     // Escaneo de red al iniciar — muestra receptores activos en la terminal
-    // IMPORTANTE: puerto 80 fijo, que es donde corren TODOS los proyectos (Jhonier, Santiago, Robert, Andres)
-    // Auto-detecta la subred local en lugar de hardcodear 192.168.0
-    const localIPs = getLocalIpv4Addresses();
-    const autoBaseIP = localIPs[0] ? localIPs[0].split('.').slice(0, 3).join('.') : '192.168.0';
-    scanNetwork({ port: 80, baseIP: autoBaseIP }).then(({ available, baseIP }) => {
+    // IMPORTANTE: Escanea TODOS los segmentos propios detectados (1-254 c/u)
+    const ownSegments = getOwnSegments();
+    const autoBaseIP = ownSegments[0] || '192.168.0';
+    
+    console.log(`🔍 Iniciando escaneo de ${ownSegments.length} segmento(s) propio(s): ${ownSegments.join(', ')}`);
+    
+    const scanPromises = ownSegments.map(segment => 
+      scanNetwork({ port: 80, baseIP: segment, startOctet: 1, endOctet: 254 })
+    );
+    
+    Promise.all(scanPromises).then(results => {
+      const allAvailable = results.flatMap(r => r.available);
+      const baseIP = results[0]?.baseIP || autoBaseIP;
+      
       console.log('');
-      console.log(`📡 Red detectada: ${baseIP}.0/24`);
+      console.log(`📡 Red detectada: ${ownSegments.join(', ')}.0/24`);
       console.log('─────────────────────────────────');
-
-      if (available.length === 0) {
+      
+      if (allAvailable.length === 0) {
         console.log('  ⚠️  No se encontraron receptores en la red');
       } else {
-        for (const { ip, path } of available) {
-          console.log(`  ✅ ${ip}  (receptor en ${path})`);
+        for (const { ip, path, segment } of allAvailable) {
+          console.log(`  ✅ ${ip}  (receptor en ${path}) [${segment}]`);
         }
       }
-
+      
       console.log('─────────────────────────────────');
-      console.log(`  ${available.length} receptor(es) encontrado(s)`);
+      console.log(`  ${allAvailable.length} receptor(es) encontrado(s) en ${results.length} segmento(s)`);
       console.log('');
     }).catch(() => {});
   });

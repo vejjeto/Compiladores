@@ -219,7 +219,7 @@ describe('ESCENARIO 8: Handler — peer desconecta antes de reconectar', () => {
       disconnect: () => { throw new Error('No debería desconectar si no hay receivers'); },
     };
 
-    const result = await scanAndConnect({ peerAdapter: mockPeer }, { port: 19999 });
+    const result = await scanAndConnect({ peerAdapter: mockPeer }, { port: 19999, startOctet: 119, endOctet: 120 });
 
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.data.available.length, 0);

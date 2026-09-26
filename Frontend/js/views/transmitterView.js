@@ -686,7 +686,8 @@ class TransmitterView {
 
       if (result.ok && result.data.available.length > 0) {
         this.scanIpsList.classList.remove('hidden');
-        const baseIP = result.data.baseIP || '192.168.0';
+        const segments = result.data.segments || (result.data.baseIP ? [result.data.baseIP] : ['red']);
+        const subnetsLabel = segments.join(', ');
 
         // Filtrar propia IP para no conectarse a sí mismo
         const filtered = result.data.available.filter(d => d.ip !== this.myIP);
@@ -699,11 +700,13 @@ class TransmitterView {
         const disponibles = filtered.filter(d => !d.occupied);
         const ocupados = filtered.filter(d => d.occupied);
 
-        let html = `<option value="">-- ${filtered.length} receptores en ${baseIP}.x`;
+        let html = `<option value="">-- ${filtered.length} receptores en ${subnetsLabel}`;
         if (disponibles.length !== filtered.length) {
           html += ` (${disponibles.length} libres, ${ocupados.length} ocupados)`;
         }
         html += ` --</option>`;
+
+        this.scanIpsSelect.innerHTML = html;
 
         // Primero disponibles, luego ocupados
         const ordenados = [...disponibles, ...ocupados];
@@ -711,11 +714,12 @@ class TransmitterView {
           const opt = document.createElement('option');
           opt.value = JSON.stringify({ ip: device.ip, path: device.path });
           const badge = device.occupied ? ' 🔴 ocupado' : ' 🟢 libre';
-          opt.textContent = `${device.ip}  (${device.path})${badge}`;
+          const segmentTag = device.segment ? ` [${device.segment}]` : '';
+          opt.textContent = `${device.ip}  (${device.path})${badge}${segmentTag}`;
           if (device.occupied) opt.disabled = true;
           this.scanIpsSelect.appendChild(opt);
         }
-        this.addLog(`Encontrados ${filtered.length} receptores en ${baseIP}.x (${disponibles.length} libres, ${ocupados.length} ocupados)`, 'valid');
+        this.addLog(`Encontrados ${filtered.length} receptores en ${subnetsLabel} (${disponibles.length} libres, ${ocupados.length} ocupados)`, 'valid');
       } else {
         this.addLog('No se encontraron receptores en la red', 'warn');
         this.scanIpsList.classList.add('hidden');
