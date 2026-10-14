@@ -212,6 +212,17 @@ async function audit(ctx) {
 }
 
 async function connectPeer(ctx, body) {
+  // R3: bloqueado mientras el dispositivo esté actuando como receptor
+  const inbound = ctx.wsServerAdapter?.peerConnections?.size || 0;
+  if (inbound >= 1) {
+    return {
+      ok: false,
+      status: 409,
+      data: { ok: false, error: 'Estás como receptor: desconectá al transmisor entrante antes de conectarte a otro receptor.' },
+      error: 'receptor-locked'
+    };
+  }
+
   const { url } = body;
 
   if (!url) {
@@ -238,11 +249,18 @@ async function connectPeer(ctx, body) {
     const result = await ctx.peerAdapter.connect(url);
     return { ok: true, status: 200, data: result, error: null };
   } catch (err) {
+    // El receptor rechaza en el upgrade con 503 cuando ya está ocupado.
+    const occupied = /503/.test(err.message);
     return {
       ok: false,
-      status: 502,
-      data: { ok: false, error: `Error conectando al receptor: ${err.message}` },
-      error: err.message
+      status: occupied ? 503 : 502,
+      data: {
+        ok: false,
+        error: occupied
+          ? 'El receptor está ocupado (ya tiene un transmisor conectado o está transmitiendo). Probá con otro dispositivo.'
+          : `Error conectando al receptor: ${err.message}`
+      },
+      error: occupied ? 'receptor-ocupado' : err.message
     };
   }
 }
@@ -315,6 +333,17 @@ async function connectCarPeer(ctx, body) {
 }
 
 async function scanAndConnect(ctx, body) {
+  // R3: bloqueado mientras el dispositivo esté actuando como receptor
+  const inbound = ctx.wsServerAdapter?.peerConnections?.size || 0;
+  if (inbound >= 1) {
+    return {
+      ok: false,
+      status: 409,
+      data: { ok: false, error: 'Estás como receptor: desconectá al transmisor entrante antes de conectarte a otro receptor.' },
+      error: 'receptor-locked'
+    };
+  }
+
   const port = body.port || 80;
   const baseIP = body.baseIP;
   const startOctet = body.startOctet;
@@ -356,6 +385,30 @@ async function scanAndConnect(ctx, body) {
     // 4. Conectar el PeerAdapter
     await ctx.peerAdapter.connect(receptorURL, 'transmitter');
 
+    // 🆕 5. CONEXIÓN AUTOMÁTICA CARRO + CÁMARA
+    const CAR_IP = '192.168.10.50';
+    const CAMERA_IP = '192.168.10.51';
+    const CAR_PORT = 80;
+    const CAMERA_PORT = 80;
+
+    try {
+      // Conectar carro
+      const carUrl = `ws://${CAR_IP}:${CAR_PORT}/ws`;
+      await ctx.peerAdapter.sendConnectCar(CAR_IP, CAR_PORT);
+      console.log(`✅ Carro conectado automáticamente: ${carUrl}`);
+      
+      // Pequeña pausa para que se estabilice
+      await new Promise(r => setTimeout(r, 800));
+      
+      // Conectar cámara (comando N)
+      await ctx.peerAdapter.sendCommand('N', 1);
+      console.log('✅ Cámara encendida automáticamente');
+      
+    } catch (carErr) {
+      console.warn('⚠️ Error conectando carro/cámara automáticamente:', carErr.message);
+      // No fallar el scan-and-connect, solo log
+    }
+
     return {
       ok: true,
       status: 200,
@@ -365,20 +418,23 @@ async function scanAndConnect(ctx, body) {
         available,
         connectedTo: chosen.ip,
         receptorURL,
-        message: `Conectado a receptor en ${chosen.ip} (${chosen.path})`
+        message: `Conectado a receptor en ${chosen.ip} (${chosen.path}) - Carro y cámara conectados automáticamente`
       },
       error: null
     };
   } catch (err) {
+    const occupied = /503/.test(err.message);
     return {
       ok: false,
-      status: 500,
+      status: occupied ? 503 : 500,
       data: {
         ok: false,
-        error: err.message,
-        message: 'Error durante el escaneo'
+        error: occupied
+          ? 'El receptor elegido está ocupado. Volvé a intentar (se elegirá otro al azar).'
+          : err.message,
+        message: occupied ? 'Receptor ocupado' : 'Error durante el escaneo'
       },
-      error: err.message
+      error: occupied ? 'receptor-ocupado' : err.message
     };
   }
 }

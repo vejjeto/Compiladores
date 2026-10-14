@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createApp } from '../server.js';
 import { codificarPrograma } from '../src/core/encriptador.js';
 
@@ -119,6 +119,29 @@ describe('API HTTP - flujo de números encriptados (Transmisor → Receptor → 
 
     const sseBlock = await ssePromise;
     assert.ok(sseBlock.includes('no confirmó'));
+  });
+
+  it('GET /estado sin carro conectado responde 200 (no 500) con robot desconectado', async () => {
+    const res = await fetch(`http://127.0.0.1:${appPort}/estado`);
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(data.robot, 'desconectado');
+    assert.strictEqual(typeof data.transmisores, 'number');
+    assert.ok(data.robotUrl.startsWith('ws://'));
+  });
+
+  it('GET /estado cuenta los transmisores conectados', async () => {
+    const peer = new WebSocket(`ws://127.0.0.1:${appPort}/transmisor`);
+    await new Promise((resolve) => peer.on('open', resolve));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const res = await fetch(`http://127.0.0.1:${appPort}/estado`);
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(data.transmisores, 1);
+
+    peer.close();
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it('POST /api/programa-numeros con programa vacío devuelve 400', async () => {

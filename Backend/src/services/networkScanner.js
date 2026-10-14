@@ -5,6 +5,12 @@ import os from 'os';
 const SCAN_TIMEOUT = parseInt(process.env.SCAN_TIMEOUT || '2000', 10); // 2s por probe
 const PARALLEL_LIMIT = 20;
 
+// Sondeo principal: GET http://ip/estado (JSON trivial, suele responder en <100ms).
+// Trae nombre del equipo, ocupación (transmisores) y estado del carro.
+const ESTADO_TIMEOUT = parseInt(process.env.SCAN_ESTADO_TIMEOUT || '1200', 10);
+// Path WS por defecto cuando detectamos el receptor por /estado (no expone su WS).
+const DEFAULT_WS_PATH = '/transmisor';
+
 // Rutas WebSocket estándar - ORDENADAS por probabilidad de éxito
 const PROBE_PATHS = [
   '/transmisor',  // 95% proyectos (Santiago, Robert, Andres, Jhonier, Diego)
@@ -80,7 +86,7 @@ const DEFAULT_BASE_IP = process.env.SCAN_BASE_IP || getPrimarySegment();
  * @param {number} opts.endOctet - Octeto final (default: 254)
  * @param {number} opts.port - Puerto WebSocket (default: 80)
  * @param {string} opts.excludeIP - IP a excluir de los resultados (ej: IP del carro)
- * @returns {Promise<{ available: {ip:string, path:string, segment:string}[], scanned: string[], segments: string[], baseIP: string }>}
+ * @returns {Promise<{ available: {ip:string, port:number, path:string, nombre:string|null, robot:string|null, transmisores:number|null, occupied:boolean, advertised:boolean, segment:string}[], scanned: string[], segments: string[], baseIP: string }>}
  */
 export async function scanNetwork({
   baseIP = DEFAULT_BASE_IP,
@@ -121,12 +127,16 @@ export async function scanNetwork({
         const ip = batch[index];
         allScanned.push(ip);
         if (result.status === 'fulfilled' && result.value) {
+          const detalle = result.value;
+          const effectivePort = detalle.port || port;
           // Excluir IP del carro si se especificó
           if (excludeIP && ip === excludeIP) {
-            logger.info('SCANNER', `${ip}:${port}${result.value} activo [${segment}] - EXCLUIDO (IP del carro)`);
+            logger.info('SCANNER', `${ip}:${effectivePort}${detalle.path} activo [${segment}] - EXCLUIDO (IP del carro)`);
           } else {
-            allAvailable.push({ ip, path: result.value, segment });
-            logger.info('SCANNER', `${ip}:${port}${result.value} activo [${segment}]`);
+            allAvailable.push({ ip, ...detalle, segment });
+            const nombreTag = detalle.nombre ? ` ${detalle.nombre} ·` : '';
+            const ocupadoTag = detalle.occupied ? ' [ocupado]' : '';
+            logger.info('SCANNER', `${ip}:${effectivePort}${detalle.path} activo [${segment}]${nombreTag}${ocupadoTag}`);
           }
         }
       });
@@ -142,12 +152,87 @@ export async function scanNetwork({
 }
 
 /**
- * Prueba si una IP tiene un receptor activo en algún path con AbortController y timeout
+ * Deriva el endpoint WebSocket anunciado por un receptor a partir de su JSON
+ * de /estado. Prioriza el primer `direcciones[]` que sea ws://|wss:// y cae a
+ * `robotUrl`. Si nada se anuncia, usa el path y puerto por defecto.
+ * @param {object} data - JSON de /estado
+ * @param {number} [fallbackPort] - puerto a usar cuando no hay anuncio
+ * @returns {{ advertised: boolean, host: string|null, port: number, path: string, url: string|null }}
+ */
+export function parseAdvertisedEndpoint(data, fallbackPort = DEFAULT_SCAN_PORT) {
+  let raw = null;
+  if (data && Array.isArray(data.direcciones)) {
+    for (const d of data.direcciones) {
+      if (typeof d === 'string' && /^wss?:\/\//i.test(d)) { raw = d; break; }
+    }
+  }
+  if (!raw && data && typeof data.robotUrl === 'string' && /^wss?:\/\//i.test(data.robotUrl)) {
+    raw = data.robotUrl;
+  }
+
+  if (!raw) {
+    return { advertised: false, host: null, port: fallbackPort, path: DEFAULT_WS_PATH, url: null };
+  }
+
+  try {
+    const u = new URL(raw);
+    const port = u.port ? Number(u.port) : (u.protocol === 'wss:' ? 443 : 80);
+    const path = u.pathname || DEFAULT_WS_PATH;
+    return {
+      advertised: true,
+      host: u.hostname,
+      port,
+      path,
+      url: `${u.protocol}//${u.hostname}:${port}${path}`,
+    };
+  } catch {
+    return { advertised: false, host: null, port: fallbackPort, path: DEFAULT_WS_PATH, url: null };
+  }
+}
+
+/**
+ * Sondea GET http://ip:port/estado. Si responde un JSON válido, devuelve los
+ * datos ricos del receptor (nombre del equipo, estado del carro, ocupación) y
+ * el endpoint WebSocket efectivo que anuncia (path + port).
+ * Si no responde /estado (p.ej. un receptor que solo expone WebSocket), null.
+ * @param {string} ip
+ * @param {number} port
+ * @returns {Promise<{port:number, path:string, nombre:string|null, robot:string|null, transmisores:number|null, occupied:boolean, advertised:boolean}|null>}
+ */
+export async function probeEstado(ip, port) {
+  try {
+    const res = await fetch(`http://${ip}:${port}/estado`, {
+      signal: AbortSignal.timeout(ESTADO_TIMEOUT),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || typeof data !== 'object' || typeof data.robot !== 'string') return null;
+
+    const transmisores = typeof data.transmisores === 'number' ? data.transmisores : 0;
+    const nombre = typeof data.nombre === 'string' && data.nombre.trim() ? data.nombre.trim() : null;
+    const endpoint = parseAdvertisedEndpoint(data, port);
+    return {
+      path: endpoint.path,
+      port: endpoint.port,
+      nombre,
+      robot: data.robot,
+      transmisores,
+      occupied: transmisores >= 1,
+      advertised: endpoint.advertised,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Prueba si una IP tiene un receptor activo en algún path WebSocket. Fallback
+ * para receptores que no exponen /estado; detecta el path que responde.
  * @param {string} ip
  * @param {number} port
  * @returns {Promise<string|null>} el path que funcionó, o null
  */
-function probeIP(ip, port) {
+function probeWebSocket(ip, port) {
   return new Promise((resolve) => {
     let resolved = false;
     const controller = new AbortController();
@@ -204,6 +289,22 @@ function probeIP(ip, port) {
       }
     }, SCAN_TIMEOUT + 200);
   });
+}
+
+/**
+ * Prueba una IP: primero /estado (datos ricos sin abrir WebSocket) y, si no
+ * responde, cae al sondeo WebSocket clásico.
+ * @param {string} ip
+ * @param {number} port
+ * @returns {Promise<{port:number, path:string, nombre:string|null, robot:string|null, transmisores:number|null, occupied:boolean, advertised:boolean}|null>}
+ */
+async function probeIP(ip, port) {
+  const porEstado = await probeEstado(ip, port);
+  if (porEstado) return porEstado;
+
+  const path = await probeWebSocket(ip, port);
+  if (!path) return null;
+  return { path, port, nombre: null, robot: null, transmisores: null, occupied: false, advertised: false };
 }
 
 /**

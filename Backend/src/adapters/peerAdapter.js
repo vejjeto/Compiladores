@@ -175,6 +175,14 @@ export class PeerAdapter {
     } catch (err) {
       logger.warn(COMPONENT, `Aviso enviando POST /robot: ${err.message}`);
     }
+    
+    // 🆕 3. Enviar comando de cámara (N) para encenderla
+    try {
+      await this.sendCommand('N', 1);
+      logger.info(COMPONENT, 'Comando cámara (N) enviado automáticamente');
+    } catch (err) {
+      logger.warn(COMPONENT, `Error enviando comando cámara: ${err.message}`);
+    }
   }
 
   sendEvent(event, data) {

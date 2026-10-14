@@ -73,13 +73,11 @@ class App {
       this.backendApplyBtn.addEventListener('click', () => this.applyBackendUrl());
     }
 
-    // Auto-switch a receptor cuando un transmisor se conecta a nosotros
+    // Auto-switch a receptor cuando un transmisor se conecta a nosotros.
+    // Defensivo: si YA estamos conectados saliendo (transmisor), ignoramos el entrante.
     this.client.onEvent(({ type, data }) => {
       if (type === 'TRANSMITTER_CONNECTED') {
-        this.switchRole('receiver');
-        this.receiverView.addAuditLog(
-          `Transmisor conectado desde ${data.ip} — modo receptor activado`, 'valid'
-        );
+        this._handleInboundTransmitter(data);
       }
       if (type === 'TRANSMITTER_DISCONNECTED') {
         this.switchRole('transmitter');
@@ -107,6 +105,25 @@ class App {
     this.client.setBaseUrl(value);
     this.transmitterView.addLog(`Backend configurado: ${value}`, 'info');
     this.receiverView.addAuditLog(`Backend configurado: ${value}`, 'info');
+  }
+
+  async _handleInboundTransmitter(data) {
+    // Si tenemos una conexión saliente activa somos transmisor:
+    // ignoramos la conexión entrante para no robar el rol.
+    try {
+      const res = await this.client.request('peer-status');
+      if (res.ok && res.data?.connected) {
+        this.transmitterView.addLog(
+          `Conexión entrante ignorada (estás como transmisor): ${data.ip}`, 'warn'
+        );
+        return;
+      }
+    } catch { }
+
+    this.switchRole('receiver');
+    this.receiverView.addAuditLog(
+      `Transmisor conectado desde ${data.ip} — modo receptor activado`, 'valid'
+    );
   }
 
   switchRole(role) {

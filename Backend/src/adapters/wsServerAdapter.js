@@ -102,6 +102,18 @@ export class WsServerAdapter {
     this.server.on('upgrade', (req, socket, head) => {
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname === '/ws' || url.pathname === '/ws/peer' || url.pathname === '/transmisor') {
+        // Rechazo en el upgrade HTTP: el cliente recibe un error limpio en vez de
+        // un handshake exitoso seguido de un cierre (que la UI leería como "conectado").
+        const lockReason = this._peerLockReason();
+        if (lockReason) {
+          const clientIp = (req.socket?.remoteAddress || 'desconocida').replace(/^::ffff:/, '');
+          this.logger.warn(COMPONENT, `Rechazado peer ${clientIp}: ${lockReason}`);
+          try {
+            socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+          } catch {}
+          socket.destroy();
+          return;
+        }
         this.peerWss.handleUpgrade(req, socket, head, (ws) => {
           this.peerWss.emit('connection', ws, req);
         });
@@ -126,16 +138,21 @@ export class WsServerAdapter {
   }
 
   _heartbeat() {
-    if (!this.wss) return;
-
-    for (const ws of this.wss.clients) {
-      if (ws.isAlive === false) {
-        ws.terminate();
-        continue;
+    const prune = (wss) => {
+      if (!wss) return;
+      for (const ws of wss.clients) {
+        if (ws.isAlive === false) {
+          ws.terminate();
+          continue;
+        }
+        ws.isAlive = false;
+        ws.ping();
       }
-      ws.isAlive = false;
-      ws.ping();
-    }
+    };
+
+    // Cubre /ws/api y monitores (/monitor), y ahora también los peers entrantes.
+    prune(this.wss);
+    prune(this.peerWss);
   }
 
   _handleConnection(ws) {
@@ -244,9 +261,42 @@ export class WsServerAdapter {
     this.peerConnections.clear();
   }
 
+  // Libera el lock de peers que ya se están cerrando: sólo un peer vivo (OPEN)
+  // mantiene el rol receptor. Evita bloquear reconexiones/reintentos del cliente.
+  _pruneDeadPeers() {
+    for (const peer of this.peerConnections) {
+      if (peer.readyState !== WebSocket.OPEN) {
+        this.peerConnections.delete(peer);
+      }
+    }
+  }
+
+  // R1/R2: el rol es un estado bloqueado y mutuamente exclusivo.
+  // Devuelve el motivo de bloqueo, o null si se puede aceptar al peer entrante.
+  _peerLockReason() {
+    this._pruneDeadPeers();
+    if (this.ctx?.peerAdapter?.connected === true) return 'ocupado como transmisor';
+    if (this.peerConnections.size >= 1) return 'receptor ocupado';
+    return null;
+  }
+
   _handlePeerConnection(ws) {
     const rawIp = ws._socket?.remoteAddress || 'desconocida';
     const clientIp = rawIp.replace(/^::ffff:/, '');
+
+    // Heartbeat: permite detectar peers muertos y liberar el lock del receptor
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+
+    // Defensivo: el upgrade ya filtra el caso normal, pero esto cubre la carrera
+    // de dos upgrades simultáneos (ambos pasan el upgrade, sólo uno entra).
+    const lockReason = this._peerLockReason();
+    if (lockReason) {
+      this.logger.warn(COMPONENT, `Rechazado peer ${clientIp}: ${lockReason}`);
+      try { ws.close(4001, lockReason); } catch {}
+      return;
+    }
+
     this.logger.info(COMPONENT, `Transmisor conectado desde ${clientIp}`);
     this.peerConnections.add(ws);
 

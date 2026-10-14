@@ -635,12 +635,42 @@ class TransmitterView {
         this.peerConnectBtn.disabled = true;
         this.peerDisconnectBtn.disabled = false;
         this.addLog(`Conectado con el dispositivo: ${res.data.address}`, 'valid');
-      } else {
+
+        // 🆕 CONEXIÓN AUTOMÁTICA CARRO + CÁMARA
+        try {
+          this.addLog('Conectando carro y cámara automáticamente...', 'info');
+          
+          // Conectar carro
+          await this.connectCar();
+          
+          // Pequeña pausa para que se estabilice
+          await new Promise(r => setTimeout(r, 800));
+          
+          // Encender cámara
+          await this.cameraOn();
+          
+          this.addLog('✅ Carro y cámara conectados automáticamente', 'valid');
+        } catch (carErr) {
+          this.addLog(`⚠️ Error auto-conectando carro/cámara: ${carErr.message}`, 'warn');
+        }
         const errorMsg = res.data?.error || res.error || 'Error desconocido';
-        this.peerStatus.textContent = 'Error de conexión';
+        const receptorLocked = res.status === 409 || res.error === 'receptor-locked';
+        const receptorOcupado = res.status === 503 || res.error === 'receptor-ocupado'
+          || /ocupad/i.test(String(res.data?.error || ''));
+        this.peerStatus.textContent = receptorLocked
+          ? 'Bloqueado: estás como receptor'
+          : receptorOcupado
+            ? 'Receptor ocupado'
+            : 'Error de conexión';
         this.peerStatus.className = 'peer-status peer-error';
         this.peerConnectBtn.disabled = false;
-        this.addLog(errorMsg.startsWith('Error') ? errorMsg : `Error conectando al receptor: ${errorMsg}`, 'invalid');
+        if (receptorLocked) {
+          this.addLog(`No se pudo conectar: ${errorMsg}`, 'invalid');
+        } else if (receptorOcupado) {
+          this.addLog(errorMsg, 'invalid');
+        } else {
+          this.addLog(errorMsg.startsWith('Error') ? errorMsg : `Error conectando al receptor: ${errorMsg}`, 'invalid');
+        }
       }
     } catch (err) {
       this.peerStatus.textContent = 'Error de conexión';
@@ -715,7 +745,8 @@ class TransmitterView {
           opt.value = JSON.stringify({ ip: device.ip, path: device.path });
           const badge = device.occupied ? ' 🔴 ocupado' : ' 🟢 libre';
           const segmentTag = device.segment ? ` [${device.segment}]` : '';
-          opt.textContent = `${device.ip}  (${device.path})${badge}${segmentTag}`;
+          const nombreTag = device.nombre ? `${device.nombre} · ` : '';
+          opt.textContent = `${nombreTag}${device.ip}  (${device.path})${badge}${segmentTag}`;
           if (device.occupied) opt.disabled = true;
           this.scanIpsSelect.appendChild(opt);
         }

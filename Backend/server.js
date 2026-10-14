@@ -14,9 +14,11 @@ import { HANDLERS } from './src/http/handlers.js';
 import { WsServerAdapter } from './src/adapters/wsServerAdapter.js';
 import { PeerAdapter } from './src/adapters/peerAdapter.js';
 import { scanNetwork, getOwnSegments } from './src/services/networkScanner.js';
+import { DEFAULT_CAR_IP } from './src/config/constants.js';
 
 const COMPONENT = 'SERVER';
 const PORT = process.env.PORT || 80;
+const HOSTNAME = os.hostname();
 const DEFAULT_STEP_DELAY = 350;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -106,6 +108,8 @@ export function createApp(options = {}) {
 
   const wsServer = new WsServerAdapter({ server: httpServer, ctx, logger });
   wsServer.start();
+  // Expuesto en ctx para que /estado reporte transmisores/monitores reales.
+  ctx.wsServerAdapter = wsServer;
 
   auditService.subscribe(({ type, data }) => {
     wsServer.broadcast(type, data);
@@ -264,15 +268,17 @@ function getMisDirecciones(port) {
   return direcciones.length > 0 ? direcciones : [{ ip: '127.0.0.1', interface: 'loopback', wsTransmisor: `ws://127.0.0.1:${port}/transmisor`, wsPeer: `ws://127.0.0.1:${port}/ws/peer`, wsApi: `ws://127.0.0.1:${port}/ws/api` }];
 }
 
-if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
-  return respond(res, 200, {
-    tipo: 'estado',
-    robot: ctx.carService.connected ? 'conectado' : 'desconectado',
-    robotUrl: ctx.carService.address ? `ws://${ctx.carService.address}/ws` : `ws://${DEFAULT_CAR_IP}/ws`,
-    transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
-    monitores: ctx.wsServerAdapter?.wss?.clients?.size || 0,
-    misDirecciones: getMisDirecciones(PORT)
-  });
+    if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
+      const carAddress = ctx.carService.address;
+      return respond(res, 200, {
+        tipo: 'estado',
+        robot: ctx.carService.connected ? 'conectado' : 'desconectado',
+        robotUrl: carAddress ? `ws://${carAddress}/ws` : `ws://${DEFAULT_CAR_IP}/ws`,
+        transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
+        monitores: ctx.wsServerAdapter?.monitorConnections?.size || 0,
+        nombre: HOSTNAME,
+        misDirecciones: getMisDirecciones(PORT)
+      });
     }
 
     if (method === 'POST') {
@@ -435,8 +441,10 @@ if (isMain) {
       if (allAvailable.length === 0) {
         console.log('  ⚠️  No se encontraron receptores en la red');
       } else {
-        for (const { ip, path, segment } of allAvailable) {
-          console.log(`  ✅ ${ip}  (receptor en ${path}) [${segment}]`);
+        for (const { ip, path, segment, nombre, occupied } of allAvailable) {
+          const nombreTag = nombre ? ` ${nombre} ·` : '';
+          const ocupadoTag = occupied ? ' [ocupado]' : '';
+          console.log(`  ✅${nombreTag} ${ip}  (receptor en ${path}) [${segment}]${ocupadoTag}`);
         }
       }
       

@@ -152,6 +152,70 @@ describe('scanNetwork', () => {
     assert.strictEqual(result.available.length, 0);
     assert.strictEqual(result.scanned.length, 3);
   });
+
+  it('debe detectar un receptor por HTTP /estado con nombre y ocupación', async () => {
+    const http = await import('node:http');
+    const server = http.createServer((req, res) => {
+      if (req.url === '/estado') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ robot: 'conectado', transmisores: 2, nombre: 'PC-Robert' }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise((resolve) => server.listen(19220, '127.0.0.1', resolve));
+
+    try {
+      const result = await scanNetwork({
+        baseIP: '127.0.0',
+        startOctet: 1,
+        endOctet: 1,
+        port: 19220,
+      });
+
+      const found = result.available.find(a => a.ip === '127.0.0.1');
+      assert.ok(found, 'debe encontrar el receptor por /estado');
+      assert.strictEqual(found.nombre, 'PC-Robert');
+      assert.strictEqual(found.robot, 'conectado');
+      assert.strictEqual(found.transmisores, 2);
+      assert.strictEqual(found.occupied, true);
+      assert.strictEqual(found.path, '/transmisor');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('debe marcar como libre un receptor con 0 transmisores y sin nombre', async () => {
+    const http = await import('node:http');
+    const server = http.createServer((req, res) => {
+      if (req.url === '/estado') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ robot: 'desconectado', transmisores: 0 }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise((resolve) => server.listen(19221, '127.0.0.1', resolve));
+
+    try {
+      const result = await scanNetwork({
+        baseIP: '127.0.0',
+        startOctet: 1,
+        endOctet: 1,
+        port: 19221,
+      });
+
+      const found = result.available.find(a => a.ip === '127.0.0.1');
+      assert.ok(found, 'debe encontrar el receptor por /estado');
+      assert.strictEqual(found.nombre, null);
+      assert.strictEqual(found.robot, 'desconectado');
+      assert.strictEqual(found.occupied, false);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
 
 // ─── Handler scanAndConnect (mockeando networkScanner) ──────────────────────
@@ -178,7 +242,11 @@ describe('handler scanAndConnect', () => {
 
   /** Crea un contexto base para el handler */
   function ctx(peerConnected = false) {
-    return { peerAdapter: mockPeer(peerConnected) };
+    return {
+      peerAdapter: mockPeer(peerConnected),
+      // El handler lee ctx.carService.address para excluir la IP del carro
+      carService: { address: null, connected: false },
+    };
   }
 
   it('debe ser una función', () => {
