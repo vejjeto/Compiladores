@@ -40,8 +40,9 @@ export class WsCarAdapter extends CarPort {
     return this.ip ? `${this.ip}:${this.port}` : null;
   }
 
-  connect(ip, port = 80) {
-    const url = `ws://${ip}:${port}/ws`;
+  connect(ip, port = 80, path = '/ws') {
+    const wsPath = (path && path.startsWith('/')) ? path : `/${path || 'ws'}`;
+    const url = `ws://${ip}:${port}${wsPath}`;
 
     if (this.connected && this.ip === ip && Number(this.port) === Number(port)) {
       return Promise.resolve({ ok: true, status: 'connected', ip, port });

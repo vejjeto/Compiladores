@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import logger from '../utils/logger.js';
 import os from 'os';
+import { EXCLUDED_CAR_IPS } from '../config/constants.js';
 
 const SCAN_TIMEOUT = parseInt(process.env.SCAN_TIMEOUT || '2000', 10); // 2s por probe
 const PARALLEL_LIMIT = 20;
@@ -67,6 +68,29 @@ export function getOwnSegments() {
 }
 
 /**
+ * Obtiene todas las IPs IPv4 propias (no loopback) de la máquina
+ * @returns {string[]}
+ */
+export function getOwnIPs() {
+  const ownIPs = new Set();
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const [, ifaces] of Object.entries(interfaces)) {
+      for (const iface of ifaces || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          ownIPs.add(iface.address);
+        }
+      }
+    }
+  } catch {
+    // Silencioso
+  }
+  return Array.from(ownIPs);
+}
+
+const OWN_HOSTNAME = os.hostname().trim().toLowerCase();
+
+/**
  * Obtiene el segmento principal (para compatibilidad)
  * @returns {string}
  */
@@ -103,6 +127,13 @@ export async function scanNetwork({
     ? getOwnSegments()
     : segments;
 
+  const ownIPs = new Set(getOwnIPs());
+  const carIPs = new Set(EXCLUDED_CAR_IPS);
+  if (excludeIP) {
+    if (Array.isArray(excludeIP)) excludeIP.forEach(ip => carIPs.add(ip));
+    else carIPs.add(excludeIP);
+  }
+
   logger.info('SCANNER', `Escaneando ${segmentsToScan.length} segmento(s): ${segmentsToScan.join(', ')}.${startOctet}-${endOctet} (paths: ${PROBE_PATHS.join(', ')})`);
 
   const allAvailable = [];
@@ -120,7 +151,17 @@ export async function scanNetwork({
     for (let i = 0; i < ips.length; i += PARALLEL_LIMIT) {
       const batch = ips.slice(i, i + PARALLEL_LIMIT);
       const results = await Promise.allSettled(
-        batch.map((ip) => probeIP(ip, port))
+        batch.map((ip) => {
+          if (ownIPs.has(ip)) {
+            logger.info('SCANNER', `${ip} [${segment}] - EXCLUIDO (IP propia)`);
+            return Promise.resolve(null);
+          }
+          if (carIPs.has(ip)) {
+            logger.info('SCANNER', `${ip} [${segment}] - EXCLUIDO (IP del carro/cámara)`);
+            return Promise.resolve(null);
+          }
+          return probeIP(ip, port);
+        })
       );
 
       results.forEach((result, index) => {
@@ -129,8 +170,12 @@ export async function scanNetwork({
         if (result.status === 'fulfilled' && result.value) {
           const detalle = result.value;
           const effectivePort = detalle.port || port;
-          // Excluir IP del carro si se especificó
-          if (excludeIP && ip === excludeIP) {
+          const deviceNameLower = detalle.nombre ? detalle.nombre.trim().toLowerCase() : '';
+          const isOwnHost = deviceNameLower && (deviceNameLower === OWN_HOSTNAME || deviceNameLower === 'zandevistan');
+
+          if (ownIPs.has(ip) || isOwnHost) {
+            logger.info('SCANNER', `${ip}:${effectivePort}${detalle.path} activo [${segment}] - EXCLUIDO (dispositivo propio${detalle.nombre ? ': ' + detalle.nombre : ''})`);
+          } else if (carIPs.has(ip)) {
             logger.info('SCANNER', `${ip}:${effectivePort}${detalle.path} activo [${segment}] - EXCLUIDO (IP del carro)`);
           } else {
             allAvailable.push({ ip, ...detalle, segment });
@@ -153,8 +198,9 @@ export async function scanNetwork({
 
 /**
  * Deriva el endpoint WebSocket anunciado por un receptor a partir de su JSON
- * de /estado. Prioriza el primer `direcciones[]` que sea ws://|wss:// y cae a
- * `robotUrl`. Si nada se anuncia, usa el path y puerto por defecto.
+ * de /estado. Prioriza el primer `direcciones[]` o `misDirecciones[]` que sea
+ * ws://|wss://. (NO usa `robotUrl` porque ese campo apunta al carro ESP32).
+ * Si nada se anuncia, usa el path y puerto por defecto (/transmisor).
  * @param {object} data - JSON de /estado
  * @param {number} [fallbackPort] - puerto a usar cuando no hay anuncio
  * @returns {{ advertised: boolean, host: string|null, port: number, path: string, url: string|null }}
@@ -166,8 +212,11 @@ export function parseAdvertisedEndpoint(data, fallbackPort = DEFAULT_SCAN_PORT) 
       if (typeof d === 'string' && /^wss?:\/\//i.test(d)) { raw = d; break; }
     }
   }
-  if (!raw && data && typeof data.robotUrl === 'string' && /^wss?:\/\//i.test(data.robotUrl)) {
-    raw = data.robotUrl;
+  if (!raw && data && Array.isArray(data.misDirecciones)) {
+    for (const d of data.misDirecciones) {
+      const candidate = d && typeof d === 'object' ? (d.wsTransmisor || d.wsPeer) : d;
+      if (typeof candidate === 'string' && /^wss?:\/\//i.test(candidate)) { raw = candidate; break; }
+    }
   }
 
   if (!raw) {
@@ -217,7 +266,7 @@ export async function probeEstado(ip, port) {
       nombre,
       robot: data.robot,
       transmisores,
-      occupied: transmisores >= 1,
+      occupied: Boolean(data.occupied) || transmisores >= 1 || data.rol === 'transmisor',
       advertised: endpoint.advertised,
     };
   } catch {

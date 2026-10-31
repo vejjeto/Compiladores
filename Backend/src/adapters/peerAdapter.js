@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import logger from '../utils/logger.js';
 import { codificarPrograma } from '../core/encriptador.js';
 import { parseCommands } from '../core/parser.js';
+import { DEFAULT_CAR_IP, DEFAULT_CAR_PORT } from '../config/constants.js';
 
 const COMPONENT = 'PEER';
 const CONNECT_TIMEOUT = 5000;
@@ -25,55 +26,121 @@ export class PeerAdapter {
     return this.ip ? `${this.ip}:${this.port}` : null;
   }
 
-  connect(url, role = 'transmitter') {
+  async connect(url, role = 'transmitter') {
     if (this.connected) {
       this.disconnect();
     }
 
+    // Construir lista de URLs candidatas: primero la pedida, luego fallbacks (/transmisor, /ws, /ws/peer)
+    const candidateUrls = [url];
+    try {
+      const parsed = new URL(url);
+      for (const fallbackPath of ['/transmisor', '/ws', '/ws/peer']) {
+        const alt = `${parsed.protocol}//${parsed.host}${fallbackPath}`;
+        if (!candidateUrls.includes(alt)) {
+          candidateUrls.push(alt);
+        }
+      }
+    } catch {}
+
+    let lastErr = null;
+    for (const targetUrl of candidateUrls) {
+      try {
+        return await this._connectSingle(targetUrl, role);
+      } catch (err) {
+        lastErr = err;
+        // Si fue rechazado por ocupado (503 / 4001 / 4003), no reintentar otros paths
+        if (/503|ocupad|modo transmisor/i.test(err.message)) {
+          throw err;
+        }
+      }
+    }
+    throw lastErr || new Error('No se pudo conectar al receptor');
+  }
+
+  _connectSingle(url, role = 'transmitter') {
     this.url = url;
     this.role = role;
-    this.isGitlabCompat = url.endsWith('/transmisor');
+    this.isGitlabCompat = url.endsWith('/transmisor') || url.endsWith('/ws');
 
     return new Promise((resolve, reject) => {
       logger.info(COMPONENT, `Conectando peer en ${url} (rol: ${role}, gitlabCompat: ${this.isGitlabCompat})`);
 
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, { handshakeTimeout: 3000 });
       let settled = false;
+      let graceTimer = null;
 
-      const timeout = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          ws.terminate();
-          reject(new Error('No se pudo conectar al receptor (Timeout: IP no responde o servidor apagado)'));
-        }
-      }, CONNECT_TIMEOUT);
-
-      ws.on('open', () => {
+      const fail = (err) => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
-        this.ws = ws;
+        clearTimeout(graceTimer);
+        this.ws = null;
+        this.ip = null;
+        this.port = null;
+        this.url = null;
+        this.role = null;
+        try { ws.terminate(); } catch {}
+        reject(err);
+      };
 
-        try {
-          const urlObj = new URL(url);
-          this.ip = urlObj.hostname;
-          this.port = urlObj.port || (urlObj.protocol === 'wss:' ? '443' : '80');
-        } catch {
-          this.ip = url;
-          this.port = 'unknown';
-        }
+      const timeout = setTimeout(() => {
+        fail(new Error('No se pudo conectar al receptor (Timeout: IP no responde o servidor apagado)'));
+      }, 3500);
 
-        logger.success(COMPONENT, `Peer conectado en ${url} (rol: ${role})`);
-        this._notifyListeners({ type: 'peer-connected', role, address: this.address });
-        resolve({ ok: true, status: 'connected', role, address: this.address });
+      ws.on('open', () => {
+        if (settled) return;
+        // Breve ventana de gracia (80ms) por si el receptor acepta el upgrade y cierra de inmediato (ej. código 4001/4003 en Robert)
+        graceTimer = setTimeout(() => {
+          if (settled || ws.readyState !== WebSocket.OPEN) return;
+          settled = true;
+          clearTimeout(timeout);
+          this.ws = ws;
+
+          try {
+            const urlObj = new URL(url);
+            this.ip = urlObj.hostname;
+            this.port = urlObj.port || (urlObj.protocol === 'wss:' ? '443' : '80');
+          } catch {
+            this.ip = url;
+            this.port = 'unknown';
+          }
+
+          logger.success(COMPONENT, `Peer conectado en ${url} (rol: ${role})`);
+          this._notifyListeners({ type: 'peer-connected', role, address: this.address });
+          resolve({ ok: true, status: 'connected', role, address: this.address, path: new URL(url, 'ws://localhost').pathname });
+        }, 80);
       });
 
       ws.on('message', (data) => {
-        this._handleMessage(data.toString());
+        const str = data.toString();
+        if (!settled) {
+          try {
+            const msg = JSON.parse(str);
+            if (msg?.motivo === 'receptor_ocupado') {
+              return fail(new Error('503 Receptor ocupado'));
+            }
+            if (msg?.motivo === 'rol_transmisor') {
+              return fail(new Error('503 El receptor elegido está en modo transmisor'));
+            }
+          } catch {}
+        }
+        this._handleMessage(str);
       });
 
-      ws.on('close', () => {
+      ws.on('close', (code, reason) => {
         clearTimeout(timeout);
+        clearTimeout(graceTimer);
+        if (!settled) {
+          const reasonStr = reason ? reason.toString() : '';
+          if (code === 4001 || /ocupad/i.test(reasonStr)) {
+            return fail(new Error('503 Receptor ocupado'));
+          }
+          if (code === 4003 || /transmisor/i.test(reasonStr)) {
+            return fail(new Error('503 El equipo destino está en modo transmisor'));
+          }
+          return fail(new Error(`Conexión cerrada por el receptor (código ${code || 'desconocido'})`));
+        }
         if (this.ws === ws) {
           this.ws = null;
           this.ip = null;
@@ -85,12 +152,8 @@ export class PeerAdapter {
       });
 
       ws.on('error', (err) => {
-        clearTimeout(timeout);
         logger.error(COMPONENT, 'Error con el peer', { error: err.message });
-        if (!settled) {
-          settled = true;
-          reject(err);
-        }
+        fail(err);
       });
     });
   }
@@ -99,6 +162,11 @@ export class PeerAdapter {
     if (this.ws) {
       const ws = this.ws;
       this.ws = null;
+      try {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'disconnect', reason: 'Transmitter closing connection' }));
+        }
+      } catch {}
       try { ws.close(); } catch {}
       this.ip = null;
       this.port = null;
@@ -152,37 +220,67 @@ export class PeerAdapter {
     }
   }
 
-  async sendConnectCar(ip, port) {
+  async sendConnectCar(ip = DEFAULT_CAR_IP, port = DEFAULT_CAR_PORT, path = '/ws') {
     if (!this.connected) throw new Error('No hay conexión con el peer');
+
+    const targetIp = ip || DEFAULT_CAR_IP;
+    const targetPort = port || DEFAULT_CAR_PORT;
+    const targetPath = (path && path.startsWith('/')) ? path : `/${path || 'ws'}`;
     
     // 1. Mensaje WS para receptores con protocolo JSON
     try {
-      this.ws.send(JSON.stringify({ type: 'connect-car', ip, port }));
+      this.ws.send(JSON.stringify({ type: 'connect-car', ip: targetIp, port: targetPort, path: targetPath }));
     } catch {}
 
     // 2. Petición HTTP POST /robot para receptores con protocolo GitLab / Andrés Cuello
+    let carConnected = false;
     try {
       const httpProto = this.url && this.url.startsWith('wss://') ? 'https' : 'http';
-      const robotUrl = `ws://${ip}:${port || 80}/ws`;
-      const postUrl = `${httpProto}://${this.ip}:${this.port || 80}/robot`;
+      const robotUrl = `ws://${targetIp}:${targetPort}${targetPath}`;
+      const baseUrl = `${httpProto}://${this.ip}:${this.port || 80}`;
+      const postUrl = `${baseUrl}/robot`;
       
-      await fetch(postUrl, {
+      const resp = await fetch(postUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: robotUrl })
+        body: JSON.stringify({ url: robotUrl }),
+        signal: AbortSignal.timeout(3500)
       });
-      logger.info(COMPONENT, `Orden POST /robot enviada a ${postUrl} (robotUrl: ${robotUrl})`);
+      if (resp.ok) {
+        logger.info(COMPONENT, `Orden POST /robot enviada a ${postUrl} (robotUrl: ${robotUrl})`);
+        // Verificar en /estado si el receptor realmente logró conectar al carro físico
+        try {
+          await new Promise(r => setTimeout(r, 800));
+          const estadoResp = await fetch(`${baseUrl}/estado`, { signal: AbortSignal.timeout(2000) });
+          if (estadoResp.ok) {
+            const estadoData = await estadoResp.json();
+            carConnected = estadoData.robot === 'conectado' || estadoData.carConnected === true;
+          } else {
+            carConnected = true;
+          }
+        } catch {
+          carConnected = true;
+        }
+      } else {
+        logger.warn(COMPONENT, `Receptor no pudo conectar al carro físico (HTTP ${resp.status})`);
+      }
     } catch (err) {
       logger.warn(COMPONENT, `Aviso enviando POST /robot: ${err.message}`);
     }
     
-    // 🆕 3. Enviar comando de cámara (N) para encenderla
-    try {
-      await this.sendCommand('N', 1);
-      logger.info(COMPONENT, 'Comando cámara (N) enviado automáticamente');
-    } catch (err) {
-      logger.warn(COMPONENT, `Error enviando comando cámara: ${err.message}`);
+    // 3. Enviar comando de cámara (N) solo si el carro realmente se conectó
+    if (carConnected) {
+      try {
+        await this.sendCommand('N', 1);
+        logger.info(COMPONENT, 'Comando cámara (N) enviado automáticamente');
+      } catch (err) {
+        logger.warn(COMPONENT, `Error enviando comando cámara: ${err.message}`);
+      }
+    } else {
+      logger.warn(COMPONENT, 'Carro apagado o sin conexión: se omite encendido automático de cámara');
     }
+
+    return { ok: carConnected };
   }
 
   sendEvent(event, data) {

@@ -289,7 +289,7 @@ DESCRIBE('Cross-Project Integration — Diego (active) ↔ Robert ↔ Andres', (
   it('6. Diego envía número encriptado → Robert receptor lo recibe', async () => {
     const puerto = 19403;
     const { child } = await levantarServidor(ROBERT_PATH, 'src/servidor.js', [
-      '--puerto', String(puerto), '--sin-robot', '--tira-pelada'
+      '--puerto', String(puerto), '--sin-robot', '--tira-pelada', '--vista', 'receptor'
     ]);
 
     try {
@@ -432,7 +432,7 @@ DESCRIBE('Cross-Project Integration — Diego (active) ↔ Robert ↔ Andres', (
   it('11. Robert rechaza números CORRUPTOS (divisibles por 2+ primos)', async () => {
     const puerto = 19408;
     const { child } = await levantarServidor(ROBERT_PATH, 'src/servidor.js', [
-      '--puerto', String(puerto), '--sin-robot', '--tira-pelada'
+      '--puerto', String(puerto), '--sin-robot', '--tira-pelada', '--vista', 'receptor'
     ]);
 
     try {

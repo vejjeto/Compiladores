@@ -1,6 +1,17 @@
 // Default network addresses — override via environment variables
-export const DEFAULT_CAR_IP = process.env.CAR_IP || '192.168.10.50';
+export const DEFAULT_CAR_IP = process.env.CAR_IP || '192.168.0.50';
 export const DEFAULT_CAR_PORT = parseInt(process.env.CAR_PORT, 10) || 80;
 
-export const CAMERA_IP = process.env.CAMERA_IP || '192.168.10.51';
+export const CAMERA_IP = process.env.CAMERA_IP || '192.168.0.51';
 export const CAMERA_STREAM = `http://${CAMERA_IP}`;
+
+// IPs reservadas de hardware (carro ESP32 y cámara) que nunca deben listarse como receptores
+export const EXCLUDED_CAR_IPS = [
+  DEFAULT_CAR_IP,
+  CAMERA_IP,
+  '192.168.0.50',
+  '192.168.0.51',
+  '192.168.10.50',
+  '192.168.10.51',
+];
+

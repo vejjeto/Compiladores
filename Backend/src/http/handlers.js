@@ -1,7 +1,8 @@
+import os from 'os';
 import { parseCommands } from '../core/parser.js';
 import { CAMERA_IP, CAMERA_STREAM, DEFAULT_CAR_IP, DEFAULT_CAR_PORT } from '../config/constants.js';
 import { tablaService } from '../services/tablaService.js';
-import { scanNetwork, pickRandom } from '../services/networkScanner.js';
+import { scanNetwork, pickRandom, getOwnIPs } from '../services/networkScanner.js';
 
 async function health(ctx) {
   return {
@@ -213,6 +214,9 @@ async function audit(ctx) {
 
 async function connectPeer(ctx, body) {
   // R3: bloqueado mientras el dispositivo esté actuando como receptor
+  if (ctx.wsServerAdapter?._pruneDeadPeers) {
+    ctx.wsServerAdapter._pruneDeadPeers();
+  }
   const inbound = ctx.wsServerAdapter?.peerConnections?.size || 0;
   if (inbound >= 1) {
     return {
@@ -249,6 +253,8 @@ async function connectPeer(ctx, body) {
     const result = await ctx.peerAdapter.connect(url);
     return { ok: true, status: 200, data: result, error: null };
   } catch (err) {
+    // Si falló el connect, asegurarse de que peerAdapter quede desconectado
+    try { ctx.peerAdapter.disconnect(); } catch {}
     // El receptor rechaza en el upgrade con 503 cuando ya está ocupado.
     const occupied = /503/.test(err.message);
     return {
@@ -267,6 +273,9 @@ async function connectPeer(ctx, body) {
 
 async function disconnectPeer(ctx) {
   ctx.peerAdapter.disconnect();
+  if (ctx.wsServerAdapter?.disconnectPeers) {
+    ctx.wsServerAdapter.disconnectPeers();
+  }
   return {
     ok: true,
     status: 200,
@@ -276,32 +285,45 @@ async function disconnectPeer(ctx) {
 }
 
 async function peerStatus(ctx) {
+  if (ctx.wsServerAdapter?._pruneDeadPeers) {
+    ctx.wsServerAdapter._pruneDeadPeers();
+  }
+  const inboundCount = ctx.wsServerAdapter?.peerConnections?.size || 0;
   return {
     ok: true,
     status: 200,
     data: {
       connected: ctx.peerAdapter.connected,
-      role: ctx.peerAdapter.role,
-      address: ctx.peerAdapter.address
+      role: ctx.peerAdapter.connected ? ctx.peerAdapter.role : (inboundCount > 0 ? 'receiver' : null),
+      address: ctx.peerAdapter.address,
+      inboundPeers: inboundCount
     },
     error: null
   };
 }
 
 async function connectCarPeer(ctx, body) {
-  const { ip, port } = body;
+  const { ip, port, path } = body;
   const carIp = ip || DEFAULT_CAR_IP;
   const carPort = port || DEFAULT_CAR_PORT;
+  const carPath = path || '/ws';
 
   // Mode 1: External peer connected → POST /robot to the external receptor
   if (ctx.peerAdapter.connected) {
     try {
-      await ctx.peerAdapter.sendConnectCar(carIp, carPort);
+      const res = await ctx.peerAdapter.sendConnectCar(carIp, carPort, carPath);
+      const carOk = res ? Boolean(res.ok) : true;
       return {
-        ok: true,
-        status: 200,
-        data: { ok: true, message: 'Orden de conectar carro enviada al receptor externo', mode: 'peer' },
-        error: null
+        ok: carOk,
+        status: carOk ? 200 : 502,
+        data: {
+          ok: carOk,
+          message: carOk
+            ? 'Carro conectado en el receptor externo'
+            : 'El receptor externo no pudo conectar al carro físico (apagado o fuera de red)',
+          mode: 'peer'
+        },
+        error: carOk ? null : 'Carro no disponible'
       };
     } catch (err) {
       return {
@@ -334,6 +356,9 @@ async function connectCarPeer(ctx, body) {
 
 async function scanAndConnect(ctx, body) {
   // R3: bloqueado mientras el dispositivo esté actuando como receptor
+  if (ctx.wsServerAdapter?._pruneDeadPeers) {
+    ctx.wsServerAdapter._pruneDeadPeers();
+  }
   const inbound = ctx.wsServerAdapter?.peerConnections?.size || 0;
   if (inbound >= 1) {
     return {
@@ -373,40 +398,51 @@ async function scanAndConnect(ctx, body) {
       };
     }
 
-    // 2. Elegir una IP al azar
-    const chosen = pickRandom(available);
-    const receptorURL = `ws://${chosen.ip}:${port}${chosen.path}`;
+    // 2. Conectar al receptor (iterando candidatos al azar para evitar race conditions si uno está ocupado o se cae)
+    const candidates = [...available].sort(() => Math.random() - 0.5);
+    let chosen = null;
+    let receptorURL = null;
+    let lastConnectError = null;
 
-    // 3. Desconectar peer anterior si existe
-    if (ctx.peerAdapter.connected) {
-      ctx.peerAdapter.disconnect();
+    for (const candidate of candidates) {
+      const targetURL = `ws://${candidate.ip}:${port}${candidate.path}`;
+      if (ctx.peerAdapter.connected) {
+        ctx.peerAdapter.disconnect();
+      }
+      try {
+        await ctx.peerAdapter.connect(targetURL, 'transmitter');
+        chosen = candidate;
+        receptorURL = targetURL;
+        break;
+      } catch (err) {
+        lastConnectError = err;
+        try { ctx.peerAdapter.disconnect(); } catch {}
+      }
     }
 
-    // 4. Conectar el PeerAdapter
-    await ctx.peerAdapter.connect(receptorURL, 'transmitter');
+    if (!chosen) {
+      throw lastConnectError || new Error('No se pudo conectar a ningún receptor disponible');
+    }
 
-    // 🆕 5. CONEXIÓN AUTOMÁTICA CARRO + CÁMARA
-    const CAR_IP = '192.168.10.50';
-    const CAMERA_IP = '192.168.10.51';
-    const CAR_PORT = 80;
-    const CAMERA_PORT = 80;
+    // 3. CONEXIÓN AUTOMÁTICA CARRO + CÁMARA (usando constantes configuradas)
+    const CAR_IP = DEFAULT_CAR_IP || '192.168.0.50';
+    const CAR_PORT = DEFAULT_CAR_PORT || 80;
+    let carConnected = false;
 
     try {
-      // Conectar carro
       const carUrl = `ws://${CAR_IP}:${CAR_PORT}/ws`;
-      await ctx.peerAdapter.sendConnectCar(CAR_IP, CAR_PORT);
-      console.log(`✅ Carro conectado automáticamente: ${carUrl}`);
-      
-      // Pequeña pausa para que se estabilice
-      await new Promise(r => setTimeout(r, 800));
-      
-      // Conectar cámara (comando N)
-      await ctx.peerAdapter.sendCommand('N', 1);
-      console.log('✅ Cámara encendida automáticamente');
-      
+      if (typeof ctx.peerAdapter.sendConnectCar === 'function') {
+        const carRes = await ctx.peerAdapter.sendConnectCar(CAR_IP, CAR_PORT, '/ws');
+        carConnected = carRes ? Boolean(carRes.ok) : true;
+      }
+      if (carConnected) {
+        console.log(`✅ Carro y cámara conectados automáticamente: ${carUrl}`);
+      } else {
+        console.warn(`⚠️ Receptor conectado (${chosen.ip}), pero el carro (${carUrl}) está apagado o fuera de línea`);
+      }
     } catch (carErr) {
       console.warn('⚠️ Error conectando carro/cámara automáticamente:', carErr.message);
-      // No fallar el scan-and-connect, solo log
+      // No fallar la conexión al receptor si el carro físico está apagado
     }
 
     return {
@@ -418,7 +454,10 @@ async function scanAndConnect(ctx, body) {
         available,
         connectedTo: chosen.ip,
         receptorURL,
-        message: `Conectado a receptor en ${chosen.ip} (${chosen.path}) - Carro y cámara conectados automáticamente`
+        carConnected,
+        message: carConnected
+          ? `Conectado a receptor en ${chosen.ip} (${chosen.path}) - Carro y cámara conectados automáticamente`
+          : `Conectado a receptor en ${chosen.ip} (${chosen.path}) - Carro físico apagado o desconectado`
       },
       error: null
     };
@@ -454,7 +493,15 @@ async function scanNetworkHandler(ctx, body) {
     return {
       ok: true,
       status: 200,
-      data: { ok: true, available, scanned, baseIP: resolvedBase, segments },
+      data: {
+        ok: true,
+        available,
+        scanned,
+        baseIP: resolvedBase,
+        segments,
+        myIPs: getOwnIPs(),
+        hostname: os.hostname()
+      },
       error: null
     };
   } catch (err) {
@@ -465,6 +512,36 @@ async function scanNetworkHandler(ctx, body) {
       error: err.message
     };
   }
+}
+
+async function misDirecciones(ctx) {
+  const port = process.env.PORT || 3000;
+  const ifaces = os.networkInterfaces();
+  const direcciones = [];
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        direcciones.push({
+          ip: iface.address,
+          interface: name,
+          wsTransmisor: `ws://${iface.address}:${port}/transmisor`,
+          wsPeer: `ws://${iface.address}:${port}/ws/peer`,
+          wsApi: `ws://${iface.address}:${port}/ws/api`
+        });
+      }
+    }
+  }
+  return {
+    ok: true,
+    status: 200,
+    data: {
+      nombre: os.hostname(),
+      misDirecciones: direcciones.length > 0
+        ? direcciones
+        : [{ ip: '127.0.0.1', interface: 'loopback', wsTransmisor: `ws://127.0.0.1:${port}/transmisor`, wsPeer: `ws://127.0.0.1:${port}/ws/peer`, wsApi: `ws://127.0.0.1:${port}/ws/api` }]
+    },
+    error: null
+  };
 }
 
 export const HANDLERS = {
@@ -484,5 +561,6 @@ export const HANDLERS = {
   'peer-status': peerStatus,
   'connect-car-peer': connectCarPeer,
   'scan-and-connect': scanAndConnect,
-  'scan-network': scanNetworkHandler
+  'scan-network': scanNetworkHandler,
+  'mis-direcciones': misDirecciones
 };

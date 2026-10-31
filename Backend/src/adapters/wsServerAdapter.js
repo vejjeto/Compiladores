@@ -9,7 +9,7 @@ import {
 } from '../protocol/clientProtocol.js';
 import { HANDLERS } from '../http/handlers.js';
 
-const HEARTBEAT_MS = 30000;
+const HEARTBEAT_MS = 10000;
 const DEFAULT_CAR_IP = '192.168.0.50';
 const DEFAULT_CAR_PORT = 80;
 const COMPONENT = 'WS-API';
@@ -242,23 +242,53 @@ export class WsServerAdapter {
     this.broadcastMonitor({ tono: 'info', texto: `[${event}] ${JSON.stringify(data)}`, hora: new Date().toISOString() });
   }
 
+  disconnectPeers() {
+    for (const peer of this.peerConnections) {
+      const rawIp = peer._socket?.remoteAddress || 'desconocida';
+      const clientIp = rawIp.replace(/^::ffff:/, '');
+      try {
+        if (peer.readyState === WebSocket.OPEN) {
+          peer.send(JSON.stringify({ type: 'disconnect', reason: 'Receiver closed connection' }));
+        }
+      } catch {}
+      try { peer.close(1000, 'Desconectado por el receptor'); } catch {}
+      try { peer.terminate(); } catch {}
+      this.ctx?.auditService?.broadcast('TRANSMITTER_DISCONNECTED', {
+        ip: clientIp,
+        timestamp: new Date().toISOString()
+      });
+    }
+    this.peerConnections.clear();
+    this.broadcastMonitor(this._buildEstado());
+  }
+
   stop() {
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
       this.heartbeat = null;
     }
+    this.disconnectPeers();
+    for (const mon of this.monitorConnections) {
+      try { mon.close(); } catch {}
+      try { mon.terminate(); } catch {}
+    }
+    this.monitorConnections.clear();
     if (this.wss) {
+      for (const client of this.wss.clients) {
+        try { client.close(); } catch {}
+        try { client.terminate(); } catch {}
+      }
       this.wss.close();
       this.wss = null;
     }
     if (this.peerWss) {
+      for (const client of this.peerWss.clients) {
+        try { client.close(); } catch {}
+        try { client.terminate(); } catch {}
+      }
       this.peerWss.close();
       this.peerWss = null;
     }
-    for (const peer of this.peerConnections) {
-      try { peer.close(); } catch {}
-    }
-    this.peerConnections.clear();
   }
 
   // Libera el lock de peers que ya se están cerrando: sólo un peer vivo (OPEN)
@@ -342,11 +372,18 @@ export class WsServerAdapter {
         msg = { type: 'programa-numeros', programa: String(msg) };
       }
 
+      if (msg.type === 'disconnect') {
+        this.logger.info(COMPONENT, `Notificación de desconexión recibida de ${clientIp}`);
+        try { ws.close(1000, 'Peer requested disconnect'); } catch {}
+        return;
+      }
+
       if (msg.type === 'connect-car') {
         // Transmitter asks receiver to connect to the car
         const carIp = msg.ip || DEFAULT_CAR_IP;
         const carPort = msg.port || DEFAULT_CAR_PORT;
-        this.logger.info(COMPONENT, `Peer pide conectar al carro: ${carIp}:${carPort}`);
+        const carPath = msg.path || '/ws';
+        this.logger.info(COMPONENT, `Peer pide conectar al carro: ${carIp}:${carPort}${carPath}`);
 
         if (this.ctx.carService.connected) {
           ws.send(JSON.stringify({ type: 'connect-car-result', ok: true, message: 'Carro ya conectado' }));
@@ -354,8 +391,8 @@ export class WsServerAdapter {
         }
 
         try {
-          await this.ctx.carService.connect(carIp, carPort);
-          ws.send(JSON.stringify({ type: 'connect-car-result', ok: true, message: `Carro conectado en ${carIp}:${carPort}` }));
+          await this.ctx.carService.connect(carIp, carPort, carPath);
+          ws.send(JSON.stringify({ type: 'connect-car-result', ok: true, message: `Carro conectado en ${carIp}:${carPort}${carPath}` }));
         } catch (err) {
           ws.send(JSON.stringify({ type: 'connect-car-result', ok: false, error: err.message }));
         }

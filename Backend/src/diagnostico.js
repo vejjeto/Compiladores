@@ -5,6 +5,7 @@
 import WebSocket from 'ws';
 
 import { pathToFileURL } from 'url';
+import { DEFAULT_CAR_IP, DEFAULT_CAR_PORT } from './config/constants.js';
 
 export async function runDiagnostico(ctx = {}) {
   const pasos = [];
@@ -33,8 +34,8 @@ export async function runDiagnostico(ctx = {}) {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  const CAR_IP = process.argv[2] || process.env.CAR_IP || '192.168.10.50';
-  const CAR_PORT = process.argv[3] || 80;
+  const CAR_IP = process.argv[2] || DEFAULT_CAR_IP;
+  const CAR_PORT = process.argv[3] || DEFAULT_CAR_PORT;
   const WS_URL = `ws://${CAR_IP}:${CAR_PORT}/ws`;
 
   console.log('╔══════════════════════════════════════════╗');

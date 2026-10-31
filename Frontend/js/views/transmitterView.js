@@ -49,9 +49,21 @@ class TransmitterView {
 
     this.videoActive = false;
     this.cameraActive = false;
+    this.myIPs = new Set();
+    this.myHostname = 'zandevistan';
 
     this.bindEvents();
     this.connectBackend();
+  }
+
+  _isOwnDevice(d) {
+    if (!d) return false;
+    const carAndCamIPs = ['192.168.0.50', '192.168.0.51', '192.168.10.50', '192.168.10.51', NetworkConfig.CAR_IP, NetworkConfig.CAMERA_IP];
+    if (d.ip && carAndCamIPs.includes(d.ip)) return true;
+    if (d.ip && (d.ip === this.myIP || (this.myIPs && this.myIPs.has(d.ip)))) return true;
+    const nombre = d.nombre ? String(d.nombre).trim().toLowerCase() : '';
+    if (nombre && (nombre === 'zandevistan' || (this.myHostname && nombre === this.myHostname))) return true;
+    return false;
   }
 
   bindEvents() {
@@ -105,10 +117,12 @@ class TransmitterView {
   }
 
   async loadMisDirecciones() {
-    if (!this.misDireccionesSection || !this.misDireccionesList) return;
     try {
       const dirs = await this.client.getMisDirecciones();
-      if (dirs.length === 0) return;
+      for (const d of dirs) {
+        if (d.ip) this.myIPs.add(d.ip);
+      }
+      if (!this.misDireccionesSection || !this.misDireccionesList || dirs.length === 0) return;
       this.misDireccionesList.innerHTML = dirs.map(d => `
         <div class="mis-direccion-item">
           <div class="mis-direccion-header">
@@ -160,6 +174,24 @@ class TransmitterView {
     } else if (type === 'CAR_MESSAGE') {
       // Manejar mensajes del carro (PC_IP, CAMERA_IP, etc.)
       this._handleCarMessage(data.message);
+    } else if (type === 'CAR_STATUS') {
+      if (data.status === 'disconnected' || data.status === 'error') {
+        if (this.carDisconnectBtn) this.carDisconnectBtn.disabled = true;
+      } else if (data.status === 'connected') {
+        if (this.carDisconnectBtn) this.carDisconnectBtn.disabled = false;
+      }
+    } else if (type === 'TRANSMITTER_CONNECTED') {
+      this.peerStatus.textContent = `Receptor activo (Transmisor: ${data.ip})`;
+      this.peerStatus.className = 'peer-status peer-connected';
+      this.peerConnectBtn.disabled = true;
+      this.peerDisconnectBtn.disabled = false;
+      this.addLog(`📡 Transmisor remoto conectado a este equipo desde ${data.ip}`, 'valid');
+    } else if (type === 'TRANSMITTER_DISCONNECTED') {
+      this.peerStatus.textContent = 'Sin conexión remota (Modo Local)';
+      this.peerStatus.className = 'peer-status';
+      this.peerConnectBtn.disabled = false;
+      this.peerDisconnectBtn.disabled = true;
+      this.addLog(`📡 Transmisor remoto desconectado (${data.ip})`, 'warn');
     } else if (type === 'PEER_PROGRESS') {
       if (data.fase === 'confirmado') {
         this.addLog(`Receptor: robot confirmó '${data.comando}'`, 'valid');
@@ -184,6 +216,7 @@ class TransmitterView {
     if (message.startsWith('PC_IP:')) {
       const pcIP = message.substring(6);
       this.myIP = pcIP; // Guardar para filtrar en scan
+      this.myIPs.add(pcIP);
       if (this.pcIpDisplay) {
         this.pcIpDisplay.textContent = 'PC: ' + pcIP;
       }
@@ -306,26 +339,35 @@ class TransmitterView {
     }
   }
 
-  async cameraOn() {
-    if (this.cameraActive) return;
+  async cameraOn(fromConnectCar = false) {
+    if (this.cameraActive) return true;
 
     if (!this.client.transport) {
       this.addLog('No hay conexión con el backend', 'invalid');
-      return;
+      return false;
     }
 
-    // Check if car is already connected (direct mode)
+    // Check if car is already connected (direct mode) or via external peer
     let carConnected = false;
+    let peerConnected = false;
     try {
-      const healthRes = await this.client.request('health');
-      carConnected = healthRes.ok && healthRes.data?.carConnected;
+      const [healthRes, peerRes] = await Promise.all([
+        this.client.request('health').catch(() => ({ ok: false })),
+        this.client.request('peer-status').catch(() => ({ ok: false }))
+      ]);
+      carConnected = Boolean(healthRes.ok && healthRes.data?.carConnected);
+      peerConnected = Boolean(peerRes.ok && peerRes.data?.connected);
     } catch { }
 
-    if (!carConnected) {
+    if (!carConnected && !peerConnected) {
+      if (fromConnectCar) {
+        return false;
+      }
       // Car not connected yet — connect first via POST /robot (same as connectCar)
-      await this.connectCar();
-      if (!this.cameraActive) return;
-      return; // connectCar already calls cameraOn recursively
+      const connectedOk = await this.connectCar('/ws', false);
+      if (!connectedOk) {
+        return false;
+      }
     }
 
     // Send camera ON command
@@ -339,12 +381,15 @@ class TransmitterView {
         this.cameraOffBtn.disabled = false;
         this.addLog('Cámara encendida', 'valid');
         this.startVideo();
+        return true;
       } else {
         const errorMsg = res.data?.error || res.error || 'desconocido';
         this.addLog(`Error encendiendo cámara: ${errorMsg}`, 'invalid');
+        return false;
       }
     } catch (err) {
       this.addLog(`Error de conexión: ${err.message}`, 'invalid');
+      return false;
     }
   }
 
@@ -488,27 +533,29 @@ class TransmitterView {
     this.logConsole.scrollTop = this.logConsole.scrollHeight;
   }
 
-  async connectCar() {
+  async connectCar(customPath = null, autoCamera = true) {
     const rawUrl = this.carUrlInput ? this.carUrlInput.value.trim() : NetworkConfig.CAR_IP;
     if (!rawUrl) {
       this.addLog('IP o URL del carro vacía', 'invalid');
-      return;
+      return false;
     }
 
     let ip = rawUrl;
     let port = 80;
     
-    // Parse if it's a URL
-    const match = rawUrl.match(/^(?:ws:\/\/)?([^:/]+)(?::(\d+))?(?:\/.*)?$/i);
+    // Parse if it's a URL (el carro ESP32 siempre usa /ws por defecto, no el path del receptor)
+    let path = customPath || '/ws';
+    const match = rawUrl.match(/^(?:ws:\/\/)?([^:/]+)(?::(\d+))?(\/.*)?$/i);
     if (match) {
       ip = match[1];
       if (match[2]) port = parseInt(match[2], 10);
+      if (match[3] && match[3] !== '/') path = match[3];
     }
 
     this.carConnectBtn.disabled = true;
-    this.addLog(`Solicitando conexión al carro (${ip}:${port})...`, 'info');
+    this.addLog(`Solicitando conexión al carro (${ip}:${port}${path})...`, 'info');
 
-    const robotUrl = `ws://${ip}:${port}/ws`;
+    const robotUrl = `ws://${ip}:${port}${path}`;
 
     try {
       // Check if there's an external peer (receptor) connected
@@ -522,26 +569,46 @@ class TransmitterView {
 
       if (peerConnected && peerAddress) {
         // External receptor mode: POST /robot directly to the external receptor
-        // (like Andrés Cuello's emisor does with receptor IP)
         const [receptorIp, receptorPort] = peerAddress.split(':');
-        const postUrl = `http://${receptorIp}:${receptorPort || 80}/robot`;
+        const baseUrl = `http://${receptorIp}:${receptorPort || 80}`;
+        const postUrl = `${baseUrl}/robot`;
         this.addLog(`POST /robot → ${postUrl} (robotUrl: ${robotUrl})`, 'info');
 
         try {
           const resp = await fetch(postUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: robotUrl })
+            body: JSON.stringify({ url: robotUrl }),
+            signal: AbortSignal.timeout(4000)
           });
-          const data = await resp.json();
+          const data = await resp.json().catch(() => ({}));
           if (!resp.ok) {
-            this.addLog(`Error POST /robot: ${data.error || resp.statusText}`, 'invalid');
-            return;
+            this.addLog(`⚠️ Carro apagado o sin conexión en el receptor: ${data.error || resp.statusText}`, 'warn');
+            this.carDisconnectBtn.disabled = true;
+            return false;
           }
+
+          // Algunos receptores (ej. Andrés/Robert/Santiago) devuelven 200 OK de inmediato en POST /robot
+          // sin esperar el handshake WebSocket con el ESP32. Verificamos /estado para saber si el carro realmente conectó.
+          await new Promise(r => setTimeout(r, 900));
+          try {
+            const estadoResp = await fetch(`${baseUrl}/estado`, { signal: AbortSignal.timeout(2000) });
+            if (estadoResp.ok) {
+              const estadoData = await estadoResp.json();
+              const isCarOnline = estadoData.robot === 'conectado' || estadoData.carConnected === true;
+              if (!isCarOnline) {
+                this.addLog(`⚠️ El receptor configuró la URL (${robotUrl}), pero el carro físico figura DESCONECTADO (apagado o fuera de red)`, 'warn');
+                this.carDisconnectBtn.disabled = true;
+                return false;
+              }
+            }
+          } catch { }
+
           this.addLog(`Receptor conectado al carro (${data.robotUrl || robotUrl})`, 'valid');
         } catch (fetchErr) {
           this.addLog(`Error POST /robot al receptor: ${fetchErr.message}`, 'invalid');
-          return;
+          this.carDisconnectBtn.disabled = true;
+          return false;
         }
       } else {
         // Local mode: POST /robot to our own backend (we ARE the receptor)
@@ -552,28 +619,35 @@ class TransmitterView {
           const resp = await fetch(postUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: robotUrl })
+            body: JSON.stringify({ url: robotUrl }),
+            signal: AbortSignal.timeout(4000)
           });
-          const data = await resp.json();
+          const data = await resp.json().catch(() => ({}));
           if (!resp.ok) {
-            this.addLog(`Error POST /robot: ${data.error || resp.statusText}`, 'invalid');
-            return;
+            this.addLog(`⚠️ El carro físico (${ip}:${port}) está apagado o no responde: ${data.error || resp.statusText}`, 'warn');
+            this.carDisconnectBtn.disabled = true;
+            return false;
           }
           this.addLog(`Carro conectado (${data.robotUrl || robotUrl})`, 'valid');
         } catch (fetchErr) {
-          this.addLog(`Error POST /robot: ${fetchErr.message}`, 'invalid');
-          return;
+          this.addLog(`⚠️ El carro físico (${ip}:${port}) está apagado o no responde: ${fetchErr.message}`, 'warn');
+          this.carDisconnectBtn.disabled = true;
+          return false;
         }
       }
 
       this.carDisconnectBtn.disabled = false;
 
-      // Auto-encender la cámara de inmediato al conectar
-      this.addLog('Encendiendo cámara del carro automáticamente...', 'info');
-      await new Promise(r => setTimeout(r, 600));
-      await this.cameraOn();
+      if (autoCamera) {
+        // Auto-encender la cámara sólo cuando el carro realmente se conectó
+        this.addLog('Encendiendo cámara del carro automáticamente...', 'info');
+        await new Promise(r => setTimeout(r, 600));
+        await this.cameraOn(true);
+      }
+      return true;
     } catch (err) {
       this.addLog(`No se pudo contactar al backend: ${err.message}`, 'invalid');
+      return false;
     } finally {
       this.carConnectBtn.disabled = false;
     }
@@ -614,14 +688,21 @@ class TransmitterView {
     if (raw.startsWith('ws://') || raw.startsWith('wss://')) {
       url = raw;
     } else {
-      // Treat as bare IP or IP:port — auto-construct ws:// URL
+      // Treat as bare IP or IP:port — auto-construct ws:// URL (el backend reintenta /transmisor, /ws, /ws/peer automáticamente)
       const ipPattern = /^[\w.-]+(:\d+)?$/;
       if (!ipPattern.test(raw)) {
         this.addLog('Formato inválido. Ingresá una IP (ej: 192.168.0.35) o una URL completa (ws://...)', 'invalid');
         return;
       }
-      url = `ws://${raw}/ws/peer`;
+      url = `ws://${raw}/transmisor`;
     }
+
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.pathname && parsedUrl.pathname !== '/') {
+        this.lastSelectedPath = parsedUrl.pathname;
+      }
+    } catch {}
 
     this.addLog(`Conectando al receptor remoto: ${url}`, 'info');
     this.peerConnectBtn.disabled = true;
@@ -636,23 +717,21 @@ class TransmitterView {
         this.peerDisconnectBtn.disabled = false;
         this.addLog(`Conectado con el dispositivo: ${res.data.address}`, 'valid');
 
-        // 🆕 CONEXIÓN AUTOMÁTICA CARRO + CÁMARA
+        // CONEXIÓN AUTOMÁTICA CARRO + CÁMARA (sólo marca conectado si el carro físico realmente responde)
         try {
-          this.addLog('Conectando carro y cámara automáticamente...', 'info');
-          
-          // Conectar carro
-          await this.connectCar();
-          
-          // Pequeña pausa para que se estabilice
-          await new Promise(r => setTimeout(r, 800));
-          
-          // Encender cámara
-          await this.cameraOn();
-          
-          this.addLog('✅ Carro y cámara conectados automáticamente', 'valid');
+          this.addLog('Intentando conectar carro y cámara automáticamente...', 'info');
+          const carOk = await this.connectCar('/ws', true);
+          if (carOk) {
+            this.addLog('✅ Carro y cámara conectados automáticamente', 'valid');
+          } else {
+            this.addLog(`⚠️ Conectado al receptor (${res.data.address}), pero el carro físico está apagado o desconectado`, 'warn');
+          }
         } catch (carErr) {
           this.addLog(`⚠️ Error auto-conectando carro/cámara: ${carErr.message}`, 'warn');
         }
+      } else {
+        // Limpieza si el backend quedó a mitad de conexión
+        await this.client.request('disconnect-peer').catch(() => {});
         const errorMsg = res.data?.error || res.error || 'Error desconocido';
         const receptorLocked = res.status === 409 || res.error === 'receptor-locked';
         const receptorOcupado = res.status === 503 || res.error === 'receptor-ocupado'
@@ -673,6 +752,8 @@ class TransmitterView {
         }
       }
     } catch (err) {
+      // Limpieza en catch
+      await this.client.request('disconnect-peer').catch(() => {});
       this.peerStatus.textContent = 'Error de conexión';
       this.peerStatus.className = 'peer-status peer-error';
       this.peerConnectBtn.disabled = false;
@@ -695,9 +776,9 @@ class TransmitterView {
       this.peerStatus.className = 'peer-status';
       this.peerConnectBtn.disabled = false;
       this.peerDisconnectBtn.disabled = true;
-      this.addLog('Desconectado del receptor remoto', 'warn');
+      this.addLog('Conexión con peer cerrada', 'warn');
     } catch (err) {
-      this.addLog(`Error desconectando receptor: ${err.message}`, 'invalid');
+      this.addLog(`Error desconectando peer: ${err.message}`, 'invalid');
     }
   }
 
@@ -714,17 +795,31 @@ class TransmitterView {
 
       this.scanIpsLoading.classList.add('hidden');
 
+      if (result.ok && Array.isArray(result.data?.myIPs)) {
+        for (const ip of result.data.myIPs) this.myIPs.add(ip);
+      }
+      if (result.ok && result.data?.hostname) {
+        this.myHostname = String(result.data.hostname).trim().toLowerCase();
+      }
+
       if (result.ok && result.data.available.length > 0) {
-        this.scanIpsList.classList.remove('hidden');
         const segments = result.data.segments || (result.data.baseIP ? [result.data.baseIP] : ['red']);
         const subnetsLabel = segments.join(', ');
 
-        // Filtrar propia IP para no conectarse a sí mismo
-        const filtered = result.data.available.filter(d => d.ip !== this.myIP);
-        const ownIPFound = result.data.available.some(d => d.ip === this.myIP);
-        if (ownIPFound) {
-          this.addLog(`IP propia (${this.myIP}) filtrada del escaneo`, 'info');
+        // Filtrar propio dispositivo (por IP o nombre de equipo como Zandevistan)
+        const filtered = result.data.available.filter(d => !this._isOwnDevice(d));
+        const ownDeviceFound = result.data.available.some(d => this._isOwnDevice(d));
+        if (ownDeviceFound) {
+          this.addLog(`Dispositivo propio filtrado del escaneo`, 'info');
         }
+
+        if (filtered.length === 0) {
+          this.addLog('No se encontraron otros receptores en la red', 'warn');
+          this.scanIpsList.classList.add('hidden');
+          return;
+        }
+
+        this.scanIpsList.classList.remove('hidden');
 
         // Separar disponibles y ocupados (si el backend envía occupied)
         const disponibles = filtered.filter(d => !d.occupied);
@@ -771,6 +866,7 @@ class TransmitterView {
     }
     const { ip, path } = JSON.parse(raw);
     const port = 80;
+    this.lastSelectedPath = path;
     this.peerUrlInput.value = `ws://${ip}:${port}${path}`;
     this.connectPeer();
   }
@@ -788,6 +884,7 @@ class TransmitterView {
       // Usar lo que ya está en el dropdown (usuario ya escaneó)
       const elegido = disponiblesEnDropdown[Math.floor(Math.random() * disponiblesEnDropdown.length)];
       const { ip, path } = JSON.parse(elegido.value);
+      this.lastSelectedPath = path;
       this.addLog(`🎲 Random (desde lista): ${ip} (${path})`, 'info');
       this.peerUrlInput.value = `ws://${ip}:80${path}`;
       this.connectPeer();
@@ -797,12 +894,18 @@ class TransmitterView {
     // No hay resultados en dropdown → hacer scan propio
     try {
       const result = await this.client.scanNetwork({});
+      if (result.ok && Array.isArray(result.data?.myIPs)) {
+        for (const ip of result.data.myIPs) this.myIPs.add(ip);
+      }
+      if (result.ok && result.data?.hostname) {
+        this.myHostname = String(result.data.hostname).trim().toLowerCase();
+      }
       if (!result.ok || !result.data.available.length) {
         this.addLog('No hay receptores para conectar aleatoriamente', 'warn');
         return;
       }
-      // Filtrar propia IP y solo libres
-      const filtered = result.data.available.filter(d => d.ip !== this.myIP);
+      // Filtrar propio dispositivo y solo libres
+      const filtered = result.data.available.filter(d => !this._isOwnDevice(d));
       const libres = filtered.filter(d => !d.occupied);
       const candidatos = libres.length > 0 ? libres : filtered;
       if (!candidatos.length) {
@@ -813,6 +916,7 @@ class TransmitterView {
       const shuffled = [...candidatos].sort(() => Math.random() - 0.5);
       for (const elegido of shuffled.slice(0, 3)) {
         this.addLog(`🎲 Random: intentando ${elegido.ip} (${elegido.path})...`, 'info');
+        this.lastSelectedPath = elegido.path;
         this.peerUrlInput.value = `ws://${elegido.ip}:80${elegido.path}`;
         try {
           await this.connectPeer();

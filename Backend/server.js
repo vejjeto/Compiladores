@@ -115,7 +115,7 @@ export function createApp(options = {}) {
     wsServer.broadcast(type, data);
   });
 
-  return { httpServer, carService, auditService, transmisorService, wsServer };
+  return { httpServer, carService, auditService, transmisorService, wsServer, peerAdapter };
 }
 
 function setCors(res) {
@@ -269,12 +269,20 @@ function getMisDirecciones(port) {
 }
 
     if (method === 'GET' && (reqPath === '/estado' || reqPath === '/api/estado')) {
+      if (ctx.wsServerAdapter?._pruneDeadPeers) {
+        ctx.wsServerAdapter._pruneDeadPeers();
+      }
       const carAddress = ctx.carService.address;
+      const inboundPeers = ctx.wsServerAdapter?.peerConnections?.size || 0;
+      const isTransmitter = ctx.peerAdapter?.connected === true;
+      const isOccupied = isTransmitter || inboundPeers >= 1;
       return respond(res, 200, {
         tipo: 'estado',
         robot: ctx.carService.connected ? 'conectado' : 'desconectado',
         robotUrl: carAddress ? `ws://${carAddress}/ws` : `ws://${DEFAULT_CAR_IP}/ws`,
-        transmisores: ctx.wsServerAdapter?.peerConnections?.size || 0,
+        transmisores: isTransmitter ? Math.max(1, inboundPeers) : inboundPeers,
+        occupied: isOccupied,
+        rol: isTransmitter ? 'transmisor' : 'receptor',
         monitores: ctx.wsServerAdapter?.monitorConnections?.size || 0,
         nombre: HOSTNAME,
         misDirecciones: getMisDirecciones(PORT)
@@ -290,6 +298,9 @@ function getMisDirecciones(port) {
       }
 
       if (reqPath === '/robot' || reqPath === '/api/robot') {
+        if (ctx.peerAdapter?.connected === true) {
+          return respond(res, 409, { error: 'Este equipo está ocupado como transmisor conectado a otro receptor' });
+        }
         let urlStr = body.url || body.robotUrl || (body.ip ? `ws://${body.ip}:${body.port || 80}/ws` : null);
         if (!urlStr) {
           return respond(res, 400, { error: 'Se esperaba {"url":"ws://host/ruta"}' });
@@ -397,7 +408,7 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 tablaService.loadTableSync();
 
 if (isMain) {
-  const { httpServer, carService } = createApp();
+  const { httpServer, carService, wsServer, peerAdapter } = createApp();
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     success(COMPONENT, `API HTTP → http://0.0.0.0:${PORT}`);
@@ -454,9 +465,22 @@ if (isMain) {
     }).catch(() => {});
   });
 
+  let shuttingDown = false;
   function closeAll() {
-    warn(COMPONENT, 'Cerrando servidor...');
-    carService.disconnect();
+    if (shuttingDown) {
+      process.exit(0);
+      return;
+    }
+    shuttingDown = true;
+    warn(COMPONENT, 'Cerrando servidor y liberando todas las conexiones...');
+    try { carService.disconnect(); } catch {}
+    try { peerAdapter?.disconnect(); } catch {}
+    try { wsServer?.stop(); } catch {}
+    try { httpServer.closeAllConnections?.(); } catch {}
+    setTimeout(() => {
+      success(COMPONENT, 'Servidor cerrado (forzado)');
+      process.exit(0);
+    }, 500).unref();
     httpServer.close(() => {
       success(COMPONENT, 'Servidor cerrado correctamente');
       process.exit(0);

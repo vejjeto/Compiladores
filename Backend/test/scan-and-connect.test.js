@@ -216,6 +216,34 @@ describe('scanNetwork', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+
+  it('debe excluir el propio dispositivo (Zandevistan / propio hostname) de available', async () => {
+    const http = await import('node:http');
+    const server = http.createServer((req, res) => {
+      if (req.url === '/estado') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ robot: 'desconectado', transmisores: 0, nombre: 'Zandevistan' }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise((resolve) => server.listen(19222, '127.0.0.1', resolve));
+
+    try {
+      const result = await scanNetwork({
+        baseIP: '127.0.0',
+        startOctet: 1,
+        endOctet: 1,
+        port: 19222,
+      });
+
+      const found = result.available.find(a => a.ip === '127.0.0.1');
+      assert.strictEqual(found, undefined, 'no debe incluir a Zandevistan en available');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
 
 // ─── Handler scanAndConnect (mockeando networkScanner) ──────────────────────
